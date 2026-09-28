@@ -1,0 +1,16 @@
+INSTALADOR DO SUDAM GESTAO PDV
+
+O instalador e gerado pelo Inno Setup 6 usando instalador.iss.
+
+Para compilar:
+1. Instale o Inno Setup 6 para Windows.
+2. Execute COMPILAR-INSTALADOR.bat.
+3. O arquivo Sudam-Gestao-PDV-Setup-1.0.0.exe sera criado na pasta dist.
+
+O instalador faz uma instalacao por usuario, cria atalho no menu Iniciar,
+oferece atalho na area de trabalho e permite iniciar o PDV ao concluir.
+O atalho abre o PDV no navegador padrao do Windows. Nao requer Python.
+
+Os cadastros e vendas ficam no armazenamento local do navegador. Para manter
+o mesmo armazenamento, abra o sistema sempre no mesmo navegador e conta do
+Windows. Use a funcao de backup do proprio PDV para exportar seus dados.

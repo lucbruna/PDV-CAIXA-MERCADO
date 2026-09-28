@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<meta name="description" content="Sudam Gestão — sistema de frente de caixa e gestão para mercadinho. PDV, estoque, crediário, financeiro e relatórios.">
+<title>Sudam Gestão · PDV</title>
+
+<script>
+(function () {
+  window.__pdvErrors = [];
+  window.addEventListener('error', function (event) {
+    var target = event.target;
+    window.__pdvErrors.push(target && (target.src || target.href)
+      ? 'Falha ao carregar: ' + (target.src || target.href)
+      : (event.message || 'Erro de JavaScript'));
+  }, true);
+  window.addEventListener('unhandledrejection', function (event) {
+    window.__pdvErrors.push('Falha ao iniciar: ' + String(event.reason && event.reason.message || event.reason));
+  });
+})();
+</script>
+<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/vertice.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%2310b981'/%3E%3Ctext y='74' x='50' text-anchor='middle' font-size='58'%3E%F0%9F%9B%92%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+
+<!-- tela de login (preenchida por app.js). Nasce escondida: o overlay é opaco e
+     cobre a tela toda, então o padrão tem que ser "fora da frente". app.js
+     remove o .hidden via showLogin() quando não há sessão salva. -->
+<div id="authScreen" class="auth hidden"></div>
+
+<!-- shell do sistema (preenchido por app.js) -->
+<div id="app" class="app"></div>
+
+<input type="file" id="importFile" accept=".json,application/json" style="display:none">
+
+<!-- dependências -->
+<script src="js/store.js"></script>
+<script src="js/qr.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/pdv.js"></script>
+<script src="js/app.js"></script>
+
+<!-- Rede de segurança: se o app não conseguiu montar o shell (script quebrado,
+     CSS não carregou, cache antigo misturado com arquivos novos), o operador
+     veria só o fundo escuro. Aqui ele recebe a causa e o que fazer. -->
+<script>
+(function () {
+  setTimeout(function () {
+    var app = document.getElementById('app');
+    var auth = document.getElementById('authScreen');
+
+    /* Caso "coberto": o app montou e renderizou, mas o overlay de login ficou
+       por cima (vazio, opaco, tela inteira) — o operador vê só um retângulo
+       escuro e não tem como clicar em nada. A checagem abaixo considerava
+       isso "carregou com sucesso" porque #app tem filhos, então nunca
+       denunciava. Aqui o overlay vazio e visível é a própria causa, e a
+       correção é esconder o overlay em vez de abortar a tela. */
+    if (auth && !auth.classList.contains('hidden') && auth.children.length === 0 && app && app.children.length > 0) {
+      auth.classList.add('hidden');
+      return;
+    }
+
+    var carregou = (app && app.children.length > 0) || (auth && auth.children.length > 0);
+    if (carregou) return;
+    if (window.__pdvBootOk) return;
+    if (document.getElementById('pdvBootFailure')) return;
+    var detalhes = (window.__pdvErrors || []).slice(0, 3).join('\n');
+    var div = document.createElement('div');
+    div.id = 'pdvBootFailure';
+    div.style.cssText = 'position:fixed;inset:0;display:grid;place-items:center;' +
+      'background:#0b1220;color:#e8eef7;font:15px/1.6 system-ui,sans-serif;padding:24px;z-index:9999';
+    div.innerHTML = '<div style="max-width:540px">' +
+      '<h1 style="font-size:19px;margin:0 0 10px">O sistema não conseguiu iniciar</h1>' +
+      '<p style="color:#9fb0c8;margin:0 0 16px">O PDV não conseguiu montar as telas. Seus dados continuam preservados. ' +
+      'Confira se os arquivos da instalação estão completos.</p>' +
+      '<ol style="color:#9fb0c8;padding-left:20px;margin:0 0 18px">' +
+      '<li>Feche e abra novamente pelo atalho do PDV.</li>' +
+      '<li>Se persistir, reinstale o PDV para restaurar os arquivos.</li>' +
+      '</ol>' +
+      '<button id="pdvReload" style="background:#1e293b;color:#e8eef7;border:1px solid #334155;' +
+      'padding:9px 15px;border-radius:8px;cursor:pointer;font:inherit">Tentar novamente</button>' +
+      '</div>';
+    if (detalhes) {
+      var pre = document.createElement('pre');
+      pre.style.cssText = 'white-space:pre-wrap;color:#fca5a5;font-size:12px';
+      pre.textContent = detalhes;
+      div.firstChild.insertBefore(pre, div.firstChild.querySelector('ol'));
+    }
+    document.body.appendChild(div);
+    document.getElementById('pdvReload').onclick = function () { location.reload(); };
+  }, 2500);
+})();
+</script>
+
+</body>
+</html>

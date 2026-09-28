@@ -1,0 +1,20 @@
+SUDAM GESTAO PDV — GUIA DE INSTALACAO
+
+1. No Windows, abra Sudam-Gestao-PDV-Setup-1.0.0.exe.
+2. Siga as etapas do instalador. O atalho será criado no menu Iniciar.
+3. Abra o Sudam Gestão PDV no navegador padrão.
+4. No primeiro acesso, use uma destas contas de demonstração:
+
+   Administrador: usuário admin, senha 1234
+   Operador de caixa: usuário caixa1, senha 0000
+
+TROQUE AS SENHAS DE DEMONSTRAÇÃO antes de cadastrar informações reais.
+Edite o catálogo de exemplo e configure os dados da sua loja.
+
+Os dados do PDV são guardados localmente no navegador e no perfil do Windows
+usado para operar. Abra sempre pelo mesmo navegador e computador. Para se
+proteger contra perda do aparelho ou do perfil, faça backups periódicos pela
+opção de backup do sistema e guarde uma cópia fora do computador.
+
+Este pacote contém software digital. Não inclui computador, leitor de código de
+barras, impressora, instalação presencial ou serviço mensal.

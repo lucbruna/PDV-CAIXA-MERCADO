@@ -1,0 +1,39 @@
+INSTRUÇÕES PARA PUBLICAR E ENTREGAR
+===================================
+
+1. Confira a categoria indicada pelo Mercado Livre para software/PDV digital e
+   selecione o formato e a modalidade de entrega compatíveis com essa categoria.
+2. Defina o preço do produto em R$ 30,00.
+3. Envie as imagens numeradas da pasta fotos. A primeira é a capa; as demais
+   mostram telas reais do PDV.
+4. Copie o título e a descrição de TEXTO-PRONTO-PARA-ANUNCIO.txt.
+5. Após a compra confirmada, entregue o instalador e as instruções pelo chat da
+   própria compra, dentro do prazo informado ao comprador.
+
+IMPORTANTE SOBRE WHATSAPP E TELEGRAM
+O vendedor informou que gostaria de entregar pelo WhatsApp ou Telegram. Para
+proteger a publicação, o texto público deste anúncio não inclui telefone,
+usuário, link, QR code nem convite para conversar fora do Mercado Livre. A ajuda
+do Mercado Livre diz para não incluir dados de contato ou links externos em
+anúncios, perguntas, respostas ou fotos. Faça a entrega pelo chat da compra.
+Só use outro canal se a plataforma permitir expressamente para esta categoria
+e o comprador concordar depois da compra; não peça contato externo antes da
+conclusão do pedido.
+
+LICENÇA E DIREITOS
+Antes de anunciar, confirme que você tem autorização para vender e distribuir
+esta versão do programa. Mantenha as licenças dos componentes de terceiros junto
+dos arquivos distribuídos. Não prometa cessão de direitos autorais, revenda ou
+modificação se isso não estiver formalmente incluído na venda. O texto promete
+uma compra única e uso sem mensalidade, sem oferecer direitos além dos que o
+vendedor pode transferir.
+
+ACESSO INICIAL
+O pacote atual cria contas de demonstração: admin / 1234 e caixa1 / 0000.
+Oriente o comprador a trocar as senhas de demonstração e configurar o sistema
+antes de cadastrar informações reais.
+
+ARQUIVOS DA VENDA
+- Instalador: ..\dist\Sudam-Gestao-PDV-Setup-1.0.0.exe
+- Texto do anúncio: TEXTO-PRONTO-PARA-ANUNCIO.txt
+- Imagens: fotos\

@@ -1,0 +1,28 @@
+# Node
+node_modules/
+
+# Banco SQLite (dados locais, não versionar)
+*.db
+*.db-wal
+*.db-shm
+dados/
+
+# Backup e temporários
+_backup/
+*.bak
+
+# Imagens e ícones (não necessitam no git)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.svg
+
+# Instalador
+dist/
+instalador.iss
+
+# Ambiente
+.env
+.env.local

@@ -24,6 +24,7 @@
   var CHAVE_TOKEN = 'sudam_token';
   var CHAVE_PEND = 'sudam_pendentes';
   var CHAVE_MIGRADO = 'sudam_migrado';
+  var CHAVE_EXPIRA = 'sudam_sessao_expira';
 
   var estado = {
     online: false,        // o servidor respondeu na ultima sondagem
@@ -47,8 +48,28 @@
   function guardarToken(t) {
     try {
       if (t) localStorage.setItem(CHAVE_TOKEN, t);
-      else localStorage.removeItem(CHAVE_TOKEN);
+      else { localStorage.removeItem(CHAVE_TOKEN); localStorage.removeItem(CHAVE_EXPIRA); }
     } catch (e) { /* modo privado sem storage: segue so em memoria */ }
+  }
+
+  /* Quando a sessao expira. O servidor manda esse valor no header de cada
+     resposta autenticada (janela deslizante de 12 h). O caixa precisa
+     saber ANTES -- avisar "sua sessao expira em 30 min" e infinitamente
+     melhor do que a proxima venda cair em 401 e ir para a fila. */
+  function lerExpira() {
+    try { return localStorage.getItem(CHAVE_EXPIRA) || null; } catch (e) { return null; }
+  }
+
+  function guardarExpira(iso) {
+    try { if (iso) localStorage.setItem(CHAVE_EXPIRA, iso); } catch (e) {}
+  }
+
+  function minutosParaExpirar() {
+    var iso = lerExpira();
+    if (!iso) return null;
+    var ms = new Date(iso).getTime() - Date.now();
+    if (isNaN(ms)) return null;
+    return Math.round(ms / 60000);
   }
 
   /* ---------------- fila do que ainda nao subiu ----------------
@@ -104,6 +125,11 @@
       signal: ctrl ? ctrl.signal : undefined,
     }).then(function (r) {
       if (timer) clearTimeout(timer);
+      // O servidor renova a sessao a cada requisicao e avisa o novo
+      // vencimento neste header. Guardar aqui e o que permite avisar o
+      // caixa antes da sessao morrer.
+      var exp = r.headers && r.headers.get('X-Sessao-Expira');
+      if (exp) guardarExpira(exp);
       return r.json().catch(function () { return {}; }).then(function (dados) {
         return { status: r.status, ok: r.ok, dados: dados };
       });
@@ -133,6 +159,7 @@
       .then(function (r) {
         if (r.status === 200 && r.dados.token) {
           guardarToken(r.dados.token);
+          if (r.dados.expiraEm) guardarExpira(r.dados.expiraEm);
           estado.autenticado = true;
           estado.usuario = r.dados.usuario || null;
           estado.online = true;
@@ -145,6 +172,9 @@
   }
 
   function logout() {
+    // Para a sondagem antes de jogar o token fora, senao o timer continua
+    // batendo no servidor a cada 10 min com um token que nao existe mais.
+    if (timerSessao) { clearInterval(timerSessao); timerSessao = null; }
     return req('POST', '/api/logout', {}).then(function () {
       guardarToken(null);
       estado.autenticado = false;
@@ -152,15 +182,15 @@
     });
   }
 
-  /* Revalida a sessao guardada. O token dura 12 h; um caixa que ficou
-     aberto o expediente inteiro precisa saber disso antes de a proxima
-     venda ser recusada por 401. */
+  /* Revalida a sessao guardada. Usa /api/sessao (leve) e nao /api/base:
+     nao ha motivo para puxar o catalogo inteiro so para checar um token. */
   function sessaoValida() {
     if (!lerToken()) return Promise.resolve(false);
-    return req('GET', '/api/base', undefined, undefined, 6000).then(function (r) {
+    return req('GET', '/api/sessao', undefined, undefined, 6000).then(function (r) {
       if (r.status === 200) {
         estado.autenticado = true;
         estado.online = true;
+        if (r.dados && r.dados.usuario) estado.usuario = r.dados.usuario;
         return true;
       }
       if (r.status === 401) {
@@ -174,6 +204,35 @@
   }
 
   /* ---------------- dados ---------------- */
+
+  /* Mantem a sessao viva sem o usuario perceber. A janela deslizante so
+     avanca quando ha requisicao; um caixa que fica 2 h sem vender (almoço,
+     fila na loja) voltaria com o token vencido. Uma sondagem leve a cada
+     10 min resolve, e devolve o token a fila de reenvio de brinde. */
+  var timerSessao = null;
+  function manterSessaoViva(intervaloMs) {
+    if (timerSessao) clearInterval(timerSessao);
+    var iv = intervaloMs || 10 * 60 * 1000;
+    timerSessao = setInterval(function () {
+      if (!lerToken()) return;
+      if (document.hidden) return; // aba em segundo plano: nao gasta
+      req('GET', '/api/sessao', undefined, undefined, 5000).then(function (r) {
+        estado.online = r.status === 200 || r.status === 401;
+        if (r.status === 401) {
+          guardarToken(null);
+          estado.autenticado = false;
+          avisarSessaoCaiu();
+        }
+      });
+    }, iv);
+    return timerSessao;
+  }
+
+  var onSessaoCaiu = null;
+  function aoCairSessao(fn) { onSessaoCaiu = fn; }
+  function avisarSessaoCaiu() {
+    if (onSessaoCaiu) { try { onSessaoCaiu(); } catch (e) {} }
+  }
 
   function base_() {
     return req('GET', '/api/base').then(function (r) {
@@ -302,6 +361,9 @@
     login: login,
     logout: logout,
     sessaoValida: sessaoValida,
+    minutosParaExpirar: minutosParaExpirar,
+    manterSessaoViva: manterSessaoViva,
+    aoCairSessao: aoCairSessao,
     base: base_,
     vendas: vendas,
     venda: venda,

@@ -14,7 +14,7 @@ import { join, extname, normalize, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
 import * as banco from './banco.mjs';
-import { gerarHash, conferir, hashAntigo, criarSessao, usuarioDaSessao, encerrarSessao, iniciarSessoes } from './auth.mjs';
+import { gerarHash, conferir, hashAntigo, criarSessao, usuarioDaSessao, encerrarSessao, iniciarSessoes, renovarSessao } from './auth.mjs';
 import { registrarVenda, estornarVenda, proximoSeq } from './venda.mjs';
 import { iniciarBackup } from './backup.mjs';
 
@@ -152,6 +152,12 @@ function exigeSessao(req, res, url, chave) {
   /* A rota precisa saber quem e o operador: o teto de desconto e o papel
      que o servidor le daqui, e nao o que o corpo da venda diz. */
   req.usuario = usuario;
+  /* Janela deslizante: cada requisicao autenticada empurra o vencimento.
+     E o que evita o logout involuntario no meio do expediente -- o caixa
+     que opera o dia inteiro praticamente nunca ve a sessao morrer. */
+  req.token = token;
+  const novaExpira = renovarSessao(db, token);
+  if (novaExpira) res.setHeader('X-Sessao-Expira', novaExpira);
   return usuario;
 }
 
@@ -443,6 +449,13 @@ for (const nome of COLECOES) {
    (abrir/fechar com conferencia cega, e hash de senha). Gravar por cima
    deixaria um turno sem cashExpected, que e exatamente o numero que a
    conferencia do caixa compara. */
+
+/* Sondagem autenticada e leve. Existe separada do /api/status (que e
+   publico) porque e ela que o cliente usa para manter a sessao viva: tem de
+   devolver 401 quando o token morreu, e o status publico nunca devolve. */
+rota('GET', '/api/sessao', async (req, res) => {
+  json(res, { usuario: { id: req.usuario.id, name: req.usuario.name, username: req.usuario.username, role: req.usuario.role } });
+});
 
 rota('GET', '/api/config', async (req, res) => {
   json(res, { config: { ...semente(), ...banco.lerConfig(db) } });

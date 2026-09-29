@@ -482,6 +482,10 @@
           return x.username.toLowerCase() === String(username || '').trim().toLowerCase() && x.active;
         });
         if (u) { db.auth.currentId = u.id; save(); }
+        // A partir daqui a sessao precisa se manter viva sozinha: quem opera
+        // o dia inteiro nao pode ver uma venda cair em 401 so porque fez
+        // Almoco. A sondagem leve renova o token e avisa se ele morrer.
+        if (typeof API !== 'undefined' && API.manterSessaoViva) API.manterSessaoViva();
         return { ok: true, usuario: res };
       }
       if (res && res.erro) return { ok: false, erro: res.erro };

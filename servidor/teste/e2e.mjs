@@ -241,11 +241,45 @@ try {
   const estInsum = await req('POST', '/api/venda/estornar', { id: 'inexistente99', motivo: 'x' }, token);
   check('estorno de venda inexistente -> 404', estInsum.status === 404, JSON.stringify(estInsum.dados));
 
-  console.log('\n16. Logout (por ultimo: mata o token)');
+  console.log('\n16. Sessao deslizante');
+  /* A janela deslizante e o que impede o caixa de ver a sessao morrer no
+     meio do expediente. Sem ela, 12 h apos o login a proxima venda cai em
+     401 e vai para a fila -- numa venda que ja estava fechada na tela. */
+  /* Precisa de uma conexao propria: o servidor tem a sua, e o WAL nao
+     aparece para quem nao fez write lock. Abrir de novo e o caminho curto. */
+  const dbSess = new DatabaseSync(DB);
+  const expiraAntes = dbSess.prepare('SELECT expiraEm FROM sessoes WHERE token=?').get(token).expiraEm;
+
+  // Token prestes a vencer (60 s): ainda vale, e a requisicao tem de empurrar
+  // o vencimento para 12 h. E o que segura o caixa o expediente inteiro.
+  dbSess.prepare('UPDATE sessoes SET expiraEm=? WHERE token=?')
+    .run(new Date(Date.now() + 60_000).toISOString(), token);
+  const aindaVivo = await req('GET', '/api/sessao', undefined, token);
+  check('token prestes a vencer ainda vale', aindaVivo.status === 200, 'status=' + aindaVivo.status);
+  const expiraDepois = dbSess.prepare('SELECT expiraEm FROM sessoes WHERE token=?').get(token).expiraEm;
+  check('requisicao renovou a sessao', new Date(expiraDepois) > new Date(expiraAntes),
+    'antes=' + expiraAntes + ' depois=' + expiraDepois);
+  check('renovou para 12 h a frente', new Date(expiraDepois).getTime() > Date.now() + 11 * 3600 * 1000,
+    'expira=' + expiraDepois);
+
+  // E o inverso: token REALMENTE vencido tem de morrer, nao ser ressuscitado
+  // pela renovacao. Se voltasse, um token de 3 dias atras voltaria a valer.
+  const tokenMorto = 'deadbeef' + '0'.repeat(56);
+  dbSess.prepare('INSERT INTO sessoes (token, usuario, criadoEm, expiraEm) VALUES (?,?,?,?)')
+    .run(tokenMorto, 'admin', new Date(Date.now() - 86400_000).toISOString(),
+         new Date(Date.now() - 3600_000).toISOString());
+  const reviving = await req('GET', '/api/sessao', undefined, tokenMorto);
+  check('token vencido nao e resuscitado', reviving.status === 401, 'status=' + reviving.status);
+  dbSess.close();
+  const sess = await req('GET', '/api/sessao', undefined, token);
+  check('/api/sessao devolve o usuario', sess.dados?.usuario?.username === 'admin', JSON.stringify(sess.dados));
+  check('/api/sessao nao vaza hash', !JSON.stringify(sess.dados || {}).includes('senhaHash'));
+
+  console.log('\n17. Logout (por ultimo: mata o token)');
   check('logout 200', (await req('POST', '/api/logout', {}, token)).status === 200);
   check('token morto apos logout', (await req('GET', '/api/base', undefined, token)).status === 401);
 
-  console.log('\n17. Rate limit no login');
+  console.log('\n18. Rate limit no login');
   /* A mesma conta, muitas vezes: e o ataque que importa (descobrir a senha
      de admin). A chave e IP+usuario de proposito -- os 5 caixas da loja
      saem do mesmo IP, e um limite so por IP trancaria o caixa legitimo. */

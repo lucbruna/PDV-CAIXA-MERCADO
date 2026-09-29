@@ -53,16 +53,35 @@ export function hashAntigo(senha) {
  * memoria) para sobreviver a reinicio do mini PC no meio do expediente.
  */
 
-const VALIDADE_HORAS = 12;
+/* Renovar a sessao a cada requisicao e o que segura o caixa aberto o
+   expediente inteiro. Sem isso, o token expira 12 h depois do login, a
+   proxima venda cai em 401 e vai para a fila -- e o caixa ve "deu erro"
+   numa venda que ele ja tinha fechado na tela. A janela deslizante de 12 h
+   significa que a sessao morre 12 h depois da ULTIMA atividade, nao do
+   login: quem opera o dia todo nunca ve expirar. */
+const JANELA_HORAS = 12;
 
 export function criarSessao(db, username) {
   const token = randomBytes(32).toString('hex');
   const agora = new Date();
-  const expira = new Date(agora.getTime() + VALIDADE_HORAS * 3600 * 1000);
+  const expira = new Date(agora.getTime() + JANELA_HORAS * 3600 * 1000);
   db.prepare(
     'INSERT INTO sessoes (token, usuario, criadoEm, expiraEm) VALUES (?, ?, ?, ?)'
   ).run(token, username, agora.toISOString(), expira.toISOString());
   return { token, expiraEm: expira.toISOString() };
+}
+
+/* Empurra o vencimento para frente. Chamado a cada requisicao autenticada;
+ * custa um UPDATE e evita o logout involuntaryario no meio do turno. */
+export function renovarSessao(db, token) {
+  if (!token) return null;
+  const expira = new Date(Date.now() + JANELA_HORAS * 3600 * 1000).toISOString();
+  try {
+    db.prepare('UPDATE sessoes SET expiraEm = ? WHERE token = ?').run(expira, token);
+    return expira;
+  } catch {
+    return null;
+  }
 }
 
 /* Devolve o usuario da sessao, ou null. Token expirado e removido na

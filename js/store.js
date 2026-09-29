@@ -408,6 +408,26 @@
   }
 
   /* ---------------- usuários ---------------- */
+
+  /* O login local (FNV) segue existindo para quando o servidor esta fora do
+     ar -- e assim o caixa nao fica preso numa tela que sempre recusa. Mas
+     quando ha servidor, quem autentica e ele (scrypt, no mini PC).
+     Store.login tenta o servidor primeiro e so cai no local se a chamada
+     nao tiver resposta de rede. */
+  function loginServidor(usuario, senha) {
+    if (typeof API === 'undefined' || !API.login) {
+      return Promise.resolve({ erro: 'Sem servidor disponivel.' });
+    }
+    return API.login(usuario, senha).then(function (r) {
+      if (r && r.ok) return { usuario: r.usuario || { username: usuario, role: 'caixa' } };
+      return { erro: (r && r.erro) || 'Não foi possível entrar.' };
+    }).catch(function () {
+      // Excecao aqui (ex.: API indefinido no meio do caminho) e tratada
+      // como "sem servidor": quem decide o fallback e loginComServidor.
+      return null;
+    });
+  }
+
   function hashPass(pass) {
     // FNV-1a + sal fixo — ofuscação local, não é criptografia de servidor.
     var h1 = 0x811c9dc5, h2 = 0x01000193;
@@ -440,6 +460,37 @@
     db.auth.currentId = u.id;
     save();
     return u;
+  }
+
+  /* Login com servidor em primeiro lugar. Mantem a assinatura antiga de
+     Store.login (sincrona, local) para as views que ja chamam direto, e
+     adiciona este caminho para o app.js, que pode aguardar.
+
+     Ordem: servidor (scrypt) -> local (FNV). So cai no local quando o
+     servidor nao respondeu de rede; se ele respondeu recusando, a recusa
+     vale e o login local nao acontece. Sem isso, um usuario apagado no
+     servidor ainda entraria pela porta dos fundos. */
+  function loginComServidor(username, pass) {
+    if (!temServidor()) {
+      var l = login(username, pass);
+      return Promise.resolve(l ? { ok: true, usuario: l } : { ok: false, erro: 'Usuário ou senha incorretos.' });
+    }
+    return loginServidor(username, pass).then(function (res) {
+      if (res && !res.erro) {
+        // Sincroniza o usuario no cache local para currentUser() funcionar.
+        var u = db.auth.users.find(function (x) {
+          return x.username.toLowerCase() === String(username || '').trim().toLowerCase() && x.active;
+        });
+        if (u) { db.auth.currentId = u.id; save(); }
+        return { ok: true, usuario: res };
+      }
+      if (res && res.erro) return { ok: false, erro: res.erro };
+      // Sem resposta do servidor: modo local, para o caixa nao ficar preso.
+      var l = login(username, pass);
+      return l
+        ? { ok: true, usuario: l, local: true }
+        : { ok: false, erro: 'Servidor fora do ar e senha local não confere.' };
+    });
   }
 
   function logout() { db.auth.currentId = null; save(); }
@@ -492,7 +543,7 @@
     return db.counters.entry++;
   }
 
-  /* ----------------的计算 helpers ---------------- */
+  /* ---------------- helpers de calculo ---------------- */
   function marginOf(p) {
     if (!p || !p.cost) return 0;
     return Math.round(((p.price - p.cost) / p.cost) * 1000) / 10;
@@ -530,6 +581,52 @@
     return db;
   }
 
+  /* ---------------- ponte com o servidor ----------------
+   *
+   * Estas funcoes sao a ligacao que faltava entre o app e o mini PC. Todas
+   * sao defensivas: se API nao existir (app aberto direto do disco) ou o
+   * servidor nao responder, elas devolvem um resultado neutro em vez de
+   * lancar. Um erro de rede nao pode derrubar a tela de venda. */
+
+  function temServidor() {
+    return typeof API !== 'undefined' && !!API.status;
+  }
+
+  /* Baixa produtos/clientes/config do servidor e substitui o local. Chamado
+     depois do login, para que os 5 caixas partam da mesma verdade. */
+  function puxarDoServidor() {
+    if (!temServidor()) return Promise.resolve({ ok: false, motivo: 'sem servidor' });
+    return API.base().then(function (b) {
+      if (!b) return { ok: false, motivo: 'sem resposta' };
+      if (Array.isArray(b.produtos) && b.produtos.length) db.products = b.produtos;
+      if (Array.isArray(b.clientes)) db.customers = b.clientes;
+      if (Array.isArray(b.fornecedores) && b.fornecedores.length) db.suppliers = b.fornecedores;
+      if (b.config) db.config = Object.assign({}, db.config, b.config);
+      if (typeof b.proximoSeq === 'number' && b.proximoSeq > (db.counters.sale || 0)) {
+        db.counters.sale = b.proximoSeq;
+      }
+      save();
+      return { ok: true, produtos: db.products.length, clientes: db.customers.length };
+    }).catch(function () { return { ok: false, motivo: 'erro' }; });
+  }
+
+  /* Envia uma venda. Quem chama decide o que fazer com o resultado: a venda
+     ja foi registrada localmente, entao falha aqui vira aviso, nao erro. */
+  function enviarVenda(venda) {
+    if (!temServidor()) return Promise.resolve({ ok: false, motivo: 'sem servidor' });
+    return API.venda(venda).catch(function () { return { ok: false, motivo: 'erro' }; });
+  }
+
+  function sincronizar(colecao, lista) {
+    if (!temServidor()) return Promise.resolve({ ok: false, motivo: 'sem servidor' });
+    return API.salvar(colecao, lista).catch(function () { return { ok: false, motivo: 'erro' }; });
+  }
+
+  function migrarParaServidor() {
+    if (!temServidor()) return Promise.resolve({ ok: false, erro: 'Servidor indisponível.' });
+    return API.migrar(db);
+  }
+
   global.Store = {
     STORAGE_KEY: STORAGE_KEY,
     CATEGORIES: CATEGORIES,
@@ -543,7 +640,14 @@
     seedUsers: seedUsers,
     currentUser: currentUser,
     login: login,
+    loginComServidor: loginComServidor,
+    loginServidor: loginServidor,
     logout: logout,
+    temServidor: temServidor,
+    puxarDoServidor: puxarDoServidor,
+    enviarVenda: enviarVenda,
+    sincronizar: sincronizar,
+    migrarParaServidor: migrarParaServidor,
     can: can,
     openShift: openShift,
     closeShift: closeShift,

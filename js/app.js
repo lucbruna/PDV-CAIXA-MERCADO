@@ -89,12 +89,25 @@
     var u = $('#authUser').value.trim();
     var p = $('#authPass').value;
     if (!u || !p) { showLogin('Preencha usuário e senha.'); return; }
-    var user = Store.login(u, p);
-    if (!user) { showLogin('Usuário ou senha incorretos.'); return; }
-    hideLogin();
-    Store.save();
-    start();
-    UI.toast('Bem-vindo, ' + user.name + '!', 'ok');
+    var btn = $('#authGo');
+    if (btn) btn.disabled = true;
+    /* Passa pelo servidor quando ha um (scrypt no mini PC). A funcao
+       resolve sempre -- nunca lanca -- para o botao nao ficar preso. */
+    Store.loginComServidor(u, p).then(function (r) {
+      if (btn) btn.disabled = false;
+      if (!r || !r.ok) { showLogin((r && r.erro) || 'Usuário ou senha incorretos.'); return; }
+      hideLogin();
+      Store.save();
+      // Com o servidor no ar, os 5 caixas passam a ler a mesma base.
+      Store.puxarDoServidor().then(function () {
+        start();
+        UI.toast('Bem-vindo, ' + (r.usuario.name || u) + '!', 'ok');
+        if (r.local) UI.toast('Servidor fora do ar — entrando em modo local.', 'warn', 5000);
+      });
+    }).catch(function () {
+      if (btn) btn.disabled = false;
+      showLogin('Não foi possível entrar. Tente novamente.');
+    });
   }
 
   function logout() {
@@ -1599,15 +1612,22 @@
   }
 
   function dataBlock() {
+    var servidor = (typeof API !== 'undefined' && API.status)
+      ? '<div class="divider" style="margin:6px 0"></div>' +
+        '<button class="btn block" data-migrar>' + icon('up', 14) + ' Migrar dados para o servidor</button>' +
+        '<button class="btn block" data-sync>' + icon('refresh', 14) + ' Sincronizar agora</button>' +
+        '<div class="modal-note mt-1" data-server-note>Verificando o servidor…</div>'
+      : '';
     return '<div class="grid" style="gap:7px">' +
       '<button class="btn block" onclick="UI.downloadBackup()">' + icon('down', 14) + ' Baixar backup (JSON)</button>' +
       '<button class="btn block" data-import>' + icon('up', 14) + ' Restaurar backup</button>' +
       '<button class="btn block" data-exportcsv>' + icon('down', 14) + ' Exportar produtos (CSV)</button>' +
+      servidor +
       '<div class="divider" style="margin:6px 0"></div>' +
       '<button class="btn block" data-seedenullish>' + icon('refresh', 14) + ' Recarregar catálogo de exemplo</button>' +
       '<button class="btn block danger" data-reset>' + icon('trash', 14) + ' Apagar todos os dados</button>' +
     '</div>' +
-    '<div class="modal-note mt-1">Os dados ficam salvos <b>somente neste navegador</b>. Limpar o histórico do navegador apaga tudo. Faça backup regularly.</div>';
+    '<div class="modal-note mt-1">Sem servidor, os dados ficam <b>somente neste navegador</b> (teto de ~5 MB). Com o servidor ligado, todos os caixas leem a mesma base.</div>';
   }
 
   function newUser() {
@@ -1923,9 +1943,67 @@
 
       if (e.target.closest('[data-import]')) { doImport(); return; }
       if (e.target.closest('[data-exportcsv]')) { exportProductsCSV(); return; }
+      if (e.target.closest('[data-migrar]')) { migrarServidor(); return; }
+      if (e.target.closest('[data-sync]')) { sincronizarServidor(); return; }
       if (e.target.closest('[data-seedenullish]')) { reloadSeed(); return; }
       if (e.target.closest('[data-reset]')) { resetAll(); return; }
     });
+    atualizarNotaServidor();
+  }
+
+  /* ---------------- ponte com o servidor (Ajustes) ---------------- */
+
+  function notaServidor(texto) {
+    var el = document.querySelector('[data-server-note]');
+    if (el) el.innerHTML = texto;
+  }
+
+  function atualizarNotaServidor() {
+    if (typeof API === 'undefined' || !API.status) return;
+    API.status().then(function (on) {
+      if (!on) {
+        notaServidor('<b style="color:#b42318">Servidor não encontrado.</b> O app funciona só neste computador.');
+        return;
+      }
+      var p = API.pendentes();
+      notaServidor('Servidor <b>conectado</b>' +
+        (API.estado.migrado ? ' · dados já migrados' : ' · ainda não migrados') +
+        (p ? ' · <b>' + p + '</b> venda(s) na fila' : ''));
+    }).catch(function () { notaServidor('Servidor não encontrado.'); });
+  }
+
+  function migrarServidor() {
+    var db = Store.db;
+    var n = (db.products || []).length + (db.customers || []).length + (db.sales || []).length;
+    UI.confirm({
+      title: 'Migrar dados para o servidor?', kind: 'warn', confirmText: 'Migrar agora',
+      message: n + ' registro(s) serão enviados ao mini PC. Depois disso, todos os caixas leem a mesma base e o limite de 5 MB do navegador deixa de importar. Este processo pode levar alguns minutos.'
+    }).then(function (ok) {
+      if (!ok) return;
+      UI.toast('Enviando dados para o servidor…', 'info', 4000);
+      return Store.migrarParaServidor();
+    }).then(function (r) {
+      if (!r) return;
+      if (r.ok) {
+        var c = r.contagem || {};
+        UI.toast('Migração concluída: ' + (c.produtos || 0) + ' produtos, ' +
+          (c.clientes || 0) + ' clientes, ' + (c.vendas || 0) + ' vendas.', 'ok', 6000);
+        atualizarNotaServidor();
+      } else {
+        UI.toast(r.erro || 'Falha ao migrar.', 'err', 6000);
+      }
+    }).catch(function () {
+      UI.toast('Falha ao migrar.', 'err');
+    });
+  }
+
+  function sincronizarServidor() {
+    UI.toast('Sincronizando…', 'info', 2000);
+    API.reenviar().then(function (r) {
+      if (r && r.ok) UI.toast(r.enviados ? r.enviados + ' registro(s) enviados.' : 'Tudo em dia.', 'ok');
+      else UI.toast((r && r.restam ? r.restam + ' registro(s) ainda na fila.' : 'Servidor indisponível.'), 'warn', 5000);
+      atualizarNotaServidor();
+    }).catch(function () { UI.toast('Servidor indisponível.', 'warn'); });
   }
 
   function viewPurchase(id) {

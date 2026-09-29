@@ -97,11 +97,34 @@ afeta o sistema.
 
 ## Estado atual da implementacao
 
+Verificado em 2026-09-29 por `servidor/teste/e2e.mjs` (52 asserções, todas
+passando) e por um teste no navegador contra o servidor de verdade.
+
 - [x] Bloqueador 1: venda travada e revertida quando o armazenamento enche
-- [ ] Servidor Node + SQLite (schema, migration, backup)
-- [ ] API REST com venda em transacao
-- [ ] Cliente lendo do servidor
-- [ ] Login no servidor
-- [ ] Divergencia de estoque
-- [ ] Teste com 5 caixas simultaneas
-- [ ] Instalador do servidor
+- [x] Servidor Node + SQLite (schema, migração de coluna, backup)
+- [x] API REST com venda em transação
+- [x] Cliente lendo do servidor (`js/api.js`: login, base, envio, fila)
+- [x] Login no servidor (scrypt + sessão por token)
+- [x] Divergência de estoque (coluna `produtos.divergencia` + aviso no PDV)
+- [x] Banco fechado contra download por HTTP + sessão em todas as rotas
+- [ ] Teste com 5 caixas simultaneas (o código suporta; falta a prova)
+- [ ] Instalador do servidor (o instalador atual é do app local)
+
+## Pendencias conhecidas
+
+- **`seq` das vendas é atribuído pelo cliente.** Duas caixas que vendem no
+  mesmo instante podem receber o mesmo `proximoSeq` do `/api/base` e a
+  segunda gravação bate no índice único `ux_venda_seq`. Para 5 caixas de
+  verdade, o `seq` precisa ser gerado pelo servidor dentro da transação.
+- **Preço vem do servidor, mas o desconto ainda vem do cliente.** O total é
+  recalculado (subtotal do cadastro menos o desconto declarado, nunca acima
+  do subtotal), o que fecha a adulteração de preço; falta um teto de
+  desconto por perfil.
+- **Estoque local não é reconciliado.** O PDV mostra o que o servidor
+  devolveu na última venda, mas não busca reconciliation periódica.
+- **Histórico antigo não é paginado no cliente.** `/api/vendas` aceita
+  `limite`/`offset` e o cliente pede 500 por vez; falta carregar o resto ao
+  rolar a lista.
+- **Rate limit no login.** Não existe. Em rede local o risco é baixo, mas
+  um brute force de `admin`/`1234` é plausível se o mini PC ficar com a
+  porta 8787 exposta por um roteador.

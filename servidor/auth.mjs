@@ -44,3 +44,56 @@ export function hashAntigo(senha) {
   }
   return h1.toString(36) + '.' + h2.toString(36) + '.' + s.length;
 }
+
+/* ---------------- sessoes ----------------
+ *
+ * Antes desta parte o /api/login verificava a senha e devolvia o usuario, sem
+ * emitir nada: todas as rotas respondiam a qualquer chamada da rede. O token
+ * abaixo e o que fecha essa porta. Vive na tabela `sessoes` (e nao em
+ * memoria) para sobreviver a reinicio do mini PC no meio do expediente.
+ */
+
+const VALIDADE_HORAS = 12;
+
+export function criarSessao(db, username) {
+  const token = randomBytes(32).toString('hex');
+  const agora = new Date();
+  const expira = new Date(agora.getTime() + VALIDADE_HORAS * 3600 * 1000);
+  db.prepare(
+    'INSERT INTO sessoes (token, usuario, criadoEm, expiraEm) VALUES (?, ?, ?, ?)'
+  ).run(token, username, agora.toISOString(), expira.toISOString());
+  return { token, expiraEm: expira.toISOString() };
+}
+
+/* Devolve o usuario da sessao, ou null. Token expirado e removido na
+ * oportunidade; a limpeza periodica e em iniciarSessoes(). */
+export function usuarioDaSessao(db, token) {
+  if (!token || typeof token !== 'string') return null;
+  const s = db.prepare('SELECT usuario, expiraEm FROM sessoes WHERE token = ?').get(token);
+  if (!s) return null;
+  if (new Date(s.expiraEm).getTime() <= Date.now()) {
+    try { db.prepare('DELETE FROM sessoes WHERE token = ?').run(token); } catch {}
+    return null;
+  }
+  const u = db.prepare('SELECT json FROM usuarios WHERE lower(username) = lower(?)').get(s.usuario);
+  if (!u) return null;
+  const reg = JSON.parse(u.json);
+  if (reg.active === false) return null;
+  return reg;
+}
+
+export function encerrarSessao(db, token) {
+  if (!token) return;
+  try { db.prepare('DELETE FROM sessoes WHERE token = ?').run(token); } catch {}
+}
+
+/* Remove sessao expirada de tempos em tempos, para a tabela nao crescer
+ * sozinha a cada login do dia. */
+export function iniciarSessoes(db) {
+  const limpar = () => {
+    try { db.prepare('DELETE FROM sessoes WHERE expiraEm <= ?').run(new Date().toISOString()); }
+    catch (e) { console.error('[sessao] falha na limpeza:', e.message); }
+  };
+  limpar();
+  setInterval(limpar, 60 * 60 * 1000).unref?.();
+}

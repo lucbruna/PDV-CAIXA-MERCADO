@@ -39,8 +39,27 @@ MINI PC (loja)                CAIXAS (rede local)
 | **Estorno** | motivo obrigatório + devolução de estoque + reversão de caixa |
 | **Financeiro** | lançamentos, contas a pagar/receber |
 | **Relatórios** | top produtos, entradas/saídas |
-| **Backup** | export/import JSON + CSV de vendas |
-| **Auth** | PBKDF2 210k iterações, roles admin/operador |
+| **Backup** | export/import JSON + CSV de vendas; servidor faz snapshot automático |
+| **Auth** | scrypt (N=16384, sal por usuário) + sessão por token, roles admin/operador |
+
+## Segurança da rede local
+
+Tudo trafega em HTTP puro na LAN, então o servidor trata o que é gratuito:
+
+- **Toda rota `/api` exige sessão.** O `/api/login` emite um token (12 h) que
+  vai em `Authorization: Bearer`; sem ele a resposta é 401. Sobe e desce
+  junto com o servidor, então reiniciar o mini PC não desconecta os caixas.
+  Única exceção: `/api/migrar` responde sem token **apenas** enquanto o banco
+  não tiver nenhum usuário (o primeiro acesso, quando ainda não há conta
+  para entrar). Depois do primeiro usuário ela tranca.
+- **O banco não é servido por HTTP.** O servidor nega `.db`, `-wal`, `-shm`
+  e as pastas `servidor/`, `_backup/`, `dist/`, `icone/`, `.git/`.
+  Antes disso, `GET /servidor/dados/sudam.db` baixava o banco inteiro —
+  clientes, CPF, dívidas e hashes de senha — sem digitar senha nenhuma.
+- **Cabeçalhos**: CSP `default-src 'self'`, `X-Content-Type-Options`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`.
+- **Senha no servidor é scrypt**, não o FNV do app antigo. O hash legado
+  ainda converte no primeiro login, sem obrigar o gerente a recriar senha.
 
 ---
 
@@ -77,20 +96,49 @@ set SUDAM_PORTA=9090 && node servidor.mjs
 set SUDAM_DB=C:\dados\pdv.db && node servidor.mjs
 ```
 
+O backup acompanha o banco: com `SUDAM_DB` apontando para outro disco, as
+cópias vão para `<pasta-do-banco>\backup`. Para separá-las de vez, use
+`SUDAM_BACKUP=C:\backup-pdv`. (Backup no mesmo disco do banco não protege
+contra o disco morrer — só contra arquivo corrompido.)
+
+## Migrar os dados que já existem
+
+O app historicamente guardava tudo no `localStorage` do navegador. Com o
+servidor no ar:
+
+1. Entre no sistema (`admin` / `1234` no primeiro acesso).
+2. **Ajustes → Dados → Migrar dados para o servidor**.
+3. Confirme. A contagem do que subiu aparece em seguida.
+
+A migração so responde sem token enquanto o banco estiver sem nenhum usuário.
+Depois do primeiro cadastro ela exige sessão, como as demais rotas.
+
+## Testes
+
+```bash
+node servidor/teste/e2e.mjs "%TEMP%" "%CD%\servidor"
+```
+
+Sobe um servidor descartável e confere o fluxo inteiro: bootstrap da migração,
+login com senha scrypt, bloqueio de sessão ausente, gravação de produto e
+cliente, venda em transação, preço vindo do servidor, divergência de estoque,
+idempotência, coleções genéricas, logout e a recusa de servir o `.db`.
+
 ---
 
 ## Estrutura do projeto
 
 ```
-├── index.html          # app principal (IIFE minificado)
-├── js/                 # store, qr, ui, pdv, app
+├── index.html          # app principal (uma página; o resto são stubs de redirecionamento)
+├── js/                 # api, store, qr, ui, pdv, app
 ├── css/                # app.css, vertice.css
 ├── servidor/
-│   ├── servidor.mjs    # entry point — HTTP + rotas
+│   ├── servidor.mjs    # entry point — HTTP + rotas + sessão
 │   ├── banco.mjs       # SQLite genérico por coleção
-│   ├── auth.mjs        # PBKDF2 login
+│   ├── auth.mjs        # scrypt + sessões
 │   ├── venda.mjs       # registrar venda, sequência
-│   └── backup.mjs      # backup diário automático
+│   ├── backup.mjs      # backup automático
+│   └── teste/e2e.mjs   # teste ponta a ponta por HTTP
 ├── dist/               # instalador Inno Setup
 └── CHECKLIST-PDV.md    # roadmap completo do projeto
 ```

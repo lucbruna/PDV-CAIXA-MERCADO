@@ -23,6 +23,13 @@ _backup/
 dist/
 instalador.iss
 
+# Releases empacotados. O ANUNCIO-MERCADO-LIVRE carrega 2 .exe e 1 .zip
+# (7 MB) que entravam no historico do git apesar das regras acima, porque
+# .gitignore so vale para arquivos nao rastreados. Para de rastrear daqui
+# em diante (o que ja esta no historico so sai com rewrite -- ver README).
+ANUNCIO-MERCADO-LIVRE/**/*.exe
+ANUNCIO-MERCADO-LIVRE/**/*.zip
+
 # Ambiente
 .env
 .env.local

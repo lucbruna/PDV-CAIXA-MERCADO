@@ -574,6 +574,26 @@
     renderAll();
     focusSearch();
 
+    /* Envia ao servidor DEPOIS de confirmar a gravacao local. A ordem e o
+       que importa: o local ja tem a venda, entao uma falha de rede aqui
+       vira aviso, nunca perda. E o cupom sai na hora -- o caixa nao espera
+       o mini PC responder. */
+    if (Store.temServidor && Store.temServidor()) {
+      Store.enviarVenda(sale).then(function (r) {
+        if (r && r.ok) {
+          if (r.repetida) return; // reenvio idempotente, nada a dizer
+          if (r.divergentes && r.divergentes.length) {
+            UI.toast('Estoque negativo em ' + r.divergentes.length + ' item(ns). O gerente foi avisado para reconciliar.', 'warn', 6000);
+          }
+          Store.puxarDoServidor(); // o estoque autoritativo volta do servidor
+        } else if (r && r.enfileirada) {
+          UI.toast('Servidor fora do ar — venda #' + id + ' guardada e será enviada depois.', 'warn', 6000);
+        } else if (r && r.erro) {
+          UI.toast('Servidor: ' + r.erro, 'warn', 6000);
+        }
+      }).catch(function () { /* nunca derruba o caixa */ });
+    }
+
     UI.toast('Venda #' + id + ' concluída · ' + money(totalV) + (change > 0 ? ' · troco ' + money(change) : ''), 'ok', 4200);
 
     UI.confirm({

@@ -9,10 +9,12 @@
 import { copyFileSync, mkdirSync, readdirSync, statSync, unlinkSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { caminhoBanco } from './banco.mjs';
+import { caminhoBanco, caminhoBackup } from './banco.mjs';
 
 const aqui = dirname(fileURLToPath(import.meta.url));
-const PASTA = join(aqui, 'dados', 'backup');
+/* A pasta acompanha o banco (ver caminhoBackup em banco.mjs). Com SUDAM_DB
+   apontando para outro disco, o backup vai para o lado daquele banco. */
+const PASTA = caminhoBackup();
 const DIAS = 30;
 
 function carimbo() {
@@ -23,9 +25,12 @@ function carimbo() {
 
 function fazer() {
   mkdirSync(PASTA, { recursive: true });
-  /* O .db e copiado junto dos arquivos -wal e -shm; sem o checkpoint o .db
-     sozinho pode estar atrasado em relacao ao que esta em memoria. */
-  for (const sufixo of ['', '-wal', '-shm']) {
+  /* O .db e copiado junto do -wal; sem o checkpoint o .db sozinho pode estar
+     atrasado em relacao ao que esta em memoria. O -shm NAO e copiado: ele e
+     um indice de memoria compartilhada, recriado pelo proprio SQLite quando
+     o banco abre, e guardar uma copia parada so ocupa espaco e confunde quem
+     for restaurar. */
+  for (const sufixo of ['', '-wal']) {
     const origem = caminhoBanco() + sufixo;
     if (existsSync(origem)) {
       copyFileSync(origem, join(PASTA, 'sudam' + sufixo + '.' + carimbo()));
@@ -49,10 +54,10 @@ function limpar() {
       try { unlinkSync(join(PASTA, f)); } catch {}
     }
   }
-  /* Arquivos -wal/-shm velhos que ficaram sem o .db correspondente. */
+  /* Arquivos -wal velhos que ficaram sem o .db correspondente. */
   for (const f of readdirSync(PASTA)) {
-    if (f.startsWith('sudam.db-wal.') || f.startsWith('sudam.db-shm.')) {
-      const base = f.replace('-wal.', '').replace('-shm.', '');
+    if (f.startsWith('sudam-wal.') || f.startsWith('sudam.db-wal.')) {
+      const base = f.replace('-wal.', '');
       if (!existsSync(join(PASTA, base))) {
         try { unlinkSync(join(PASTA, f)); } catch {}
       }

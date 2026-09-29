@@ -13,6 +13,15 @@ import { fileURLToPath } from 'node:url';
 
 const aqui = dirname(fileURLToPath(import.meta.url));
 
+/* A pasta de backup acompanha o banco. Se SUDAM_DB aponta para outro disco,
+   o backup precisa ir para o lado daquele banco -- senao o .db fica em
+   C:\dados e as copias em C:\programa\servidor\dados\backup, que e
+   exatamente o que a documentacao promete proteger contra ("pasta
+   separada"). */
+export function caminhoBackup() {
+  return process.env.SUDAM_BACKUP || join(dirname(caminhoBanco()), 'backup');
+}
+
 export function caminhoBanco() {
   return process.env.SUDAM_DB || join(aqui, 'dados', 'sudam.db');
 }
@@ -35,6 +44,7 @@ export function abrir() {
       category TEXT,
       price REAL,
       stock REAL,
+      divergencia INTEGER DEFAULT 0,
       json TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS ix_prod_code ON produtos(code);
@@ -140,7 +150,25 @@ export function abrir() {
       chave TEXT PRIMARY KEY,
       valor TEXT
     );
+
+    /* Sessoes: o token do login vive aqui, nao em memoria, para que um
+       reinicio do mini PC nao desconecte os 5 caixas no meio do expediente. */
+    CREATE TABLE IF NOT EXISTS sessoes (
+      token TEXT PRIMARY KEY,
+      usuario TEXT NOT NULL,
+      criadoEm TEXT,
+      expiraEm TEXT
+    );
+    CREATE INDEX IF NOT EXISTS ix_sessao_expira ON sessoes(expiraEm);
   `);
+
+  /* Bancos criados antes desta coluna existem em maquinas ja instaladas.
+     CREATE TABLE IF NOT EXISTS nao altera tabela existente, entao a coluna
+     nova e adicionada aqui, de forma idempotente. */
+  const colProdutos = db.prepare('PRAGMA table_info(produtos)').all();
+  if (colProdutos.length && !colProdutos.some((c) => c.name === 'divergencia')) {
+    db.exec('ALTER TABLE produtos ADD COLUMN divergencia INTEGER DEFAULT 0');
+  }
 
   return db;
 }
@@ -187,22 +215,36 @@ export function gravar(db, tabela, obj) {
   return obj;
 }
 
+/* ---------- acesso generico por colecao ---------- */
+
+/* SQLite nao permite BEGIN dentro de BEGIN. /api/migrar involve varias
+   colecoes numa transacao so, e cada gravarVarios abria a sua propria --
+   o resultado era "cannot start a transaction within a transaction" e a
+   migracao inteira devolvia 500. Estes dois helpers prestam conta de uma
+   transacao que ja esteja aberta. */
+function emTransacao(db) {
+  try { return db.isTransaction; } catch { return false; }
+}
+
 export function gravarVarios(db, tabela, lista) {
   if (!lista.length) return 0;
   const cols = colunas(tabela);
-  const nomes = ['id', ...cols];
+  /* `json` entra como coluna do INSERT -- ver nota em sqlDoUpsert. Sem ela
+     toda gravacao batia em NOT NULL e nada era persistido. */
+  const nomes = ['id', ...cols, 'json'];
   const marcadores = nomes.map(() => '?').join(', ');
   const atualiza = cols.map((c) => `${c} = excluded.${c}`).join(', ');
   const sql = `INSERT INTO ${tabela} (${nomes.join(', ')}) VALUES (${marcadores})
                ON CONFLICT(id) DO UPDATE SET json = excluded.json${atualiza ? ', ' + atualiza : ''}`;
   const st = db.prepare(sql);
-  const linhas = lista.map((obj) => [obj.id, ...cols.map((c) => valorColuna(c, obj))]);
-  db.exec('BEGIN');
+  const linhas = lista.map((obj) => [obj.id, ...cols.map((c) => valorColuna(c, obj)), JSON.stringify(obj)]);
+  const propria = !emTransacao(db);
+  if (propria) db.exec('BEGIN');
   try {
     for (const args of linhas) st.run(...args);
-    db.exec('COMMIT');
+    if (propria) db.exec('COMMIT');
   } catch (e) {
-    db.exec('ROLLBACK');
+    if (propria) db.exec('ROLLBACK');
     throw e;
   }
   return lista.length;
@@ -214,7 +256,7 @@ export function remover(db, tabela, id) {
 
 function colunas(t) {
   switch (t) {
-    case 'produtos': return ['code', 'name', 'category', 'price', 'stock'];
+    case 'produtos': return ['code', 'name', 'category', 'price', 'stock', 'divergencia'];
     case 'clientes': return ['name', 'cpf', 'debt'];
     case 'fornecedores': return ['name'];
     case 'vendas': return ['seq', 'date', 'shiftId', 'operatorId', 'customerId', 'total', 'forma', 'divergencia'];
@@ -243,8 +285,13 @@ function valorColuna(col, obj) {
 
 function sqlDoUpsert(t, obj) {
   const cols = colunas(t);
-  const nomes = ['id', ...cols];
-  const vals = [obj.id, ...cols.map((c) => valorColuna(c, obj))];
+  /* A coluna `json` precisa entrar na lista de colunas do INSERT. A versao
+     anterior montava a lista como ['id', ...cols] e o ON CONFLICT repetia
+     `json = excluded.json` -- mas json nunca era inserido, e a coluna e
+     NOT NULL. Resultado: "NOT NULL constraint failed: produtos.json" na
+     primeira gravacao, ou seja, o servidor nunca gravou nada mesmo. */
+  const nomes = ['id', ...cols, 'json'];
+  const vals = [obj.id, ...cols.map((c) => valorColuna(c, obj)), JSON.stringify(obj)];
   const marcadores = nomes.map(() => '?').join(', ');
   const atualiza = cols.map((c) => `${c} = excluded.${c}`).join(', ');
   return {
@@ -267,12 +314,13 @@ export function gravarConfig(db, objeto) {
   const st = db.prepare(
     'INSERT INTO config (chave, json) VALUES (?, ?) ON CONFLICT(chave) DO UPDATE SET json = excluded.json'
   );
-  db.exec('BEGIN');
+  const propria = !emTransacao(db);
+  if (propria) db.exec('BEGIN');
   try {
     for (const [k, v] of Object.entries(objeto)) st.run(k, JSON.stringify(v ?? null));
-    db.exec('COMMIT');
+    if (propria) db.exec('COMMIT');
   } catch (e) {
-    db.exec('ROLLBACK');
+    if (propria) db.exec('ROLLBACK');
     throw e;
   }
 }

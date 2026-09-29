@@ -457,7 +457,7 @@
     return '<div class="table-wrap"><table><thead><tr><th>Produto</th><th>Atual</th><th>Mínimo</th><th class="right">Sugestão</th><th>Situação</th></tr></thead><tbody>' +
       list.slice(0, 12).map(function (p) {
         var sug = Math.max(0, (p.min * 3) - p.stock);
-        return '<tr><td><b>' + p.emoji + ' ' + esc(p.name) + '</b><br><span class="tiny muted">' + esc(p.code || '') + '</span></td>' +
+        return '<tr><td><b>' + esc(p.emoji) + ' ' + esc(p.name) + '</b><br><span class="tiny muted">' + esc(p.code || '') + '</span></td>' +
           '<td><span class="badge ' + (p.stock === 0 ? 'red' : 'amber') + '">' + p.stock + '</span></td>' +
           '<td>' + p.min + '</td>' +
           '<td class="right num"><b>' + money(sug * p.cost) + '</b><br><span class="tiny muted">' + sug + ' un</span></td>' +
@@ -573,7 +573,7 @@
         '<div class="divider"></div><div class="pay-label">Itens</div>' +
         '<div class="table-wrap"><table><thead><tr><th>Produto</th><th class="right">Qtd</th><th class="right">Unit.</th><th class="right">Total</th></tr></thead><tbody>' +
         s.items.map(function (i) {
-          return '<tr><td>' + (i.emoji || '') + ' ' + esc(i.name) + '</td><td class="right num">' + i.qty + ' ' + esc(i.unit || 'un') +
+          return '<tr><td>' + esc(i.emoji || '') + ' ' + esc(i.name) + '</td><td class="right num">' + i.qty + ' ' + esc(i.unit || 'un') +
             '</td><td class="right num">' + money(i.price) + '</td><td class="right num"><b>' + money(UI.round2(i.price * i.qty)) + '</b></td></tr>';
         }).join('') + '</tbody></table></div>' +
         '<div class="divider"></div><div class="pay-label">Pagamento</div>' +
@@ -630,7 +630,7 @@
       card('Catálogo', '<div class="toolbar">' +
         '<div class="search-wrap">' + icon('search', 15) + '<input class="field" id="prodQ" placeholder="Buscar por nome, código, categoria ou fornecedor" value="' + esc(f.q) + '"></div>' +
         '<select class="field" style="width:auto" id="prodCat"><option value="all">Todas as categorias</option>' +
-        db.categories.map(function (c) { return '<option value="' + esc(c.id) + '"' + (f.cat === c.id ? ' selected' : '') + '>' + c.emoji + ' ' + esc(c.name) + '</option>'; }).join('') + '</select>' +
+          db.categories.map(function (c) { return '<option value="' + esc(c.id) + '"' + (f.cat === c.id ? ' selected' : '') + '>' + esc(c.emoji) + ' ' + esc(c.name) + '</option>'; }).join('') + '</select>' +
         '<select class="field" style="width:auto" id="prodStatus">' +
         [['all', 'Todos'], ['low', 'Estoque baixo'], ['out', 'Zerados'], ['exp', 'Vencendo/vencido'], ['off', 'Inativos']]
           .map(function (o) { return '<option value="' + o[0] + '"' + (f.status === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
@@ -649,8 +649,8 @@
           : dExp <= 30 ? '<span class="badge amber">' + dExp + 'd</span>'
           : '<span class="badge green">' + UI.dateOnly(p.expiry) + '</span>';
         return '<tr data-prod="' + esc(p.id) + '" class="clickable' + (p.active ? '' : ' opacity:0.5') + '">' +
-          '<td><b>' + p.emoji + ' ' + esc(p.name) + '</b><br><span class="tiny muted">' + esc(p.code || p.barcode || '') + '</span></td>' +
-          '<td><span class="badge" style="border-color:' + cat.color + '55">' + cat.emoji + ' ' + esc(cat.name) + '</span></td>' +
+          '<td><b>' + esc(p.emoji) + ' ' + esc(p.name) + '</b><br><span class="tiny muted">' + esc(p.code || p.barcode || '') + '</span></td>' +
+          '<td><span class="badge" style="border-color:' + esc(cat.color) + '55">' + esc(cat.emoji) + ' ' + esc(cat.name) + '</span></td>' +
           '<td>' + expBadge + '</td>' +
           '<td class="right num">' + money(p.cost) + '</td>' +
           '<td class="right num"><b>' + money(p.price) + '</b></td>' +
@@ -881,7 +881,7 @@
       return '<div class="table-wrap"><table><thead><tr><th>Produto</th><th class="right">Qtd</th><th class="right">Custo</th><th class="right">Total</th><th></th></tr></thead><tbody>' +
         pick.map(function (i, idx) {
           var p = db.products.find(function (x) { return x.id === i.id; });
-          return '<tr><td><b>' + p.emoji + ' ' + esc(p.name) + '</b><br><span class="tiny muted">Estoque ' + p.stock + ' · venda ' + money(p.price) + '</span></td>' +
+          return '<tr><td><b>' + esc(p.emoji) + ' ' + esc(p.name) + '</b><br><span class="tiny muted">Estoque ' + p.stock + ' · venda ' + money(p.price) + '</span></td>' +
             '<td class="right"><input class="field" style="width:88px;text-align:right" type="number" min="0.001" step="0.001" data-pq="' + idx + '" value="' + i.qty + '"></td>' +
             '<td class="right"><input class="field" style="width:100px;text-align:right" type="number" min="0" step="0.01" data-pc="' + idx + '" value="' + (i.cost != null ? i.cost : p.cost) + '"></td>' +
             '<td class="right num"><b>' + money(UI.round2(i.qty * i.cost)) + '</b></td>' +
@@ -1601,7 +1601,7 @@
     var db = Store.db;
     return '<div class="list-plain">' + db.categories.map(function (c) {
       var n = db.products.filter(function (p) { return p.category === c.id; }).length;
-      return '<div class="list-item"><span class="thumb-emoji" style="background:' + c.color + '22">' + c.emoji + '</span>' +
+          return '<div class="list-item"><span class="thumb-emoji" style="background:' + esc(c.color) + '22">' + esc(c.emoji) + '</span>' +
         '<span class="grow"><b>' + esc(c.name) + '</b><small>' + n + ' produto(s)</small></span>' +
         '<button class="mini-btn danger" data-delcat="' + esc(c.id) + '" ' + (n ? 'disabled title="Há produtos nesta categoria"' : '') + '>' + icon('trash', 13) + '</button></div>';
     }).join('') + '</div>' +
@@ -1976,9 +1976,11 @@
         return;
       }
       var p = API.pendentes();
+      var rej = API.rejeitados ? API.rejeitados() : 0;
       notaServidor('Servidor <b>conectado</b>' +
         (API.estado.migrado ? ' · dados já migrados' : ' · ainda não migrados') +
-        (p ? ' · <b>' + p + '</b> venda(s) na fila' : ''));
+        (p ? ' · <b>' + p + '</b> venda(s) na fila' : '') +
+        (rej ? ' · <b style="color:#b42318">' + rej + '</b> recusado(s) pelo servidor' : ''));
     }).catch(function () { notaServidor('Servidor não encontrado.'); });
   }
 
@@ -2010,8 +2012,19 @@
   function sincronizarServidor() {
     UI.toast('Sincronizando…', 'info', 2000);
     API.reenviar().then(function (r) {
-      if (r && r.ok) UI.toast(r.enviados ? r.enviados + ' registro(s) enviados.' : 'Tudo em dia.', 'ok');
-      else UI.toast((r && r.restam ? r.restam + ' registro(s) ainda na fila.' : 'Servidor indisponível.'), 'warn', 5000);
+      if (!r) { UI.toast('Servidor indisponível.', 'warn'); return; }
+      if (r.recusados) {
+        /* Recusa definitiva e o caso que exige fala: o servidor disse que esse
+         * registro nao entra, entao ele saiu da fila. Se isso passar em
+         * silencio, o gerente nunca descobre que aquela venda nao esta no
+         * servidor -- e so descobre quando a contagem de caixa nao bate. */
+        UI.toast(r.recusados + ' registro(s) recusado(s) pelo servidor e guardado(s) para você revisar.',
+          'err', 9000);
+      }
+      if (r.enviados) UI.toast(r.enviados + ' registro(s) enviados.', 'ok');
+      else if (!r.recusados && r.ok) UI.toast('Tudo em dia.', 'ok');
+      else if (r.restam) UI.toast(r.restam + ' registro(s) ainda na fila.', 'warn', 5000);
+      else if (!r.recusados) UI.toast('Servidor indisponível.', 'warn', 5000);
       atualizarNotaServidor();
     }).catch(function () { UI.toast('Servidor indisponível.', 'warn'); });
   }
@@ -2030,7 +2043,7 @@
         '<div class="table-wrap"><table><thead><tr><th>Produto</th><th class="right">Qtd</th><th class="right">Custo</th><th class="right">Total</th></tr></thead><tbody>' +
         pc.items.map(function (i) {
           var p = db.products.find(function (x) { return x.id === i.id; });
-          return '<tr><td>' + (p ? p.emoji + ' ' + esc(p.name) : 'produto removido') + '</td>' +
+          return '<tr><td>' + (p ? esc(p.emoji) + ' ' + esc(p.name) : 'produto removido') + '</td>' +
             '<td class="right num">' + i.qty + '</td><td class="right num">' + money(i.cost) + '</td>' +
             '<td class="right num"><b>' + money(UI.round2(i.qty * i.cost)) + '</b></td></tr>';
         }).join('') + '</tbody><tfoot><tr><td colspan="3">Total</td><td class="right num">' + money(pc.total) + '</td></tr></tfoot></table></div>',

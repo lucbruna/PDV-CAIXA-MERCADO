@@ -119,14 +119,74 @@ try {
   check('divida nao subiu em venda a vista', cl?.debt === 0, 'debt=' + cl?.debt);
 
   console.log('\n7. Preco vem do servidor, nao do corpo');
+  /* O corpo mente sobre o preco (0.01 em vez de 2.5) mas PAGA o valor que o
+   * servidor vai cobrar. A mentira no preco e absorvida — o total sai 2.5.
+   * (Esta versao pagava 0.01 e ainda esperava 200: o servidor aceitava uma
+   * venda de R$ 2,50 receivebendo R$ 0,01, e o troco/gaveteiro/financeiro
+   * ficavam com o valor do corpo. Ver o bloco 7b.) */
   const ad = await req('POST', '/api/venda', {
     id: 'v2', seq: 1002, date: '2026-09-29T12:05:00.000Z',
     items: [{ id: 'p1', name: 'Agua', qty: 1, price: 0.01 }],
-    total: 0.01, change: 0, payments: [{ method: 'Dinheiro', amount: 0.01 }],
+    total: 0.01, change: 0, payments: [{ method: 'Dinheiro', amount: 2.5 }],
   }, token);
-  check('venda adulterada aceita como venda normal', ad.status === 200);
+  check('venda adulterada aceita como venda normal', ad.status === 200, JSON.stringify(ad.dados));
   check('total recalculado pelo servidor (2.5)', ad.dados?.venda?.total === 2.5, 'total=' + ad.dados?.venda?.total);
   check('preco do item reescrito (2.5)', ad.dados?.venda?.items?.[0]?.price === 2.5);
+  check('troco recalculado pelo servidor (0)', ad.dados?.venda?.change === 0, 'troco=' + ad.dados?.venda?.change);
+
+  console.log('\n7b. Pagamento conferido contra o total (dinheiro real)');
+  /* A lacuna que a versao anterior nao pegava: o preco do item ja era do
+   * servidor, mas o VALOR PAGO ainda vinha do corpo. Uma venda de R$ 100
+   * com `payments: [{Dinheiro, 0.01}]` era aceita e o gaveteiro, o
+   * financeiro e o troco registravam 0,01. */
+  const sub = await req('POST', '/api/venda', {
+    id: 'v2b', items: [{ id: 'p2', name: 'Coca', qty: 10 }],
+    payments: [{ method: 'Dinheiro', amount: 0.01 }], change: 0,
+  }, token);
+  check('pagamento insuficiente -> 400', sub.status === 400, 'status=' + sub.status);
+  check('  motivo nomeado', sub.dados?.codigo === 'pagamento_insuficiente', JSON.stringify(sub.dados));
+  check('  estoque nao foi tocado',
+    (await req('GET', '/api/produtos?busca=Coca', undefined, token)).dados?.produtos?.[0]?.stock === 2,
+    'stock=' + (await req('GET', '/api/produtos?busca=Coca', undefined, token)).dados?.produtos?.[0]?.stock);
+
+  const cred = await req('POST', '/api/venda', {
+    id: 'v2c', items: [{ id: 'p2', name: 'Coca', qty: 1 }],
+    customerId: 'c1', payments: [{ method: 'Crediário', amount: 999999 }], change: 0,
+  }, token);
+  check('crediario acima do total -> 400', cred.status === 400, 'status=' + cred.status);
+  check('  divida do cliente intacta',
+    (await req('GET', '/api/base', undefined, token)).dados?.clientes?.find((c) => c.id === 'c1')?.debt === 0);
+
+  const semPg = await req('POST', '/api/venda', {
+    id: 'v2d', items: [{ id: 'p2', name: 'Coca', qty: 1 }], payments: [], change: 0,
+  }, token);
+  check('venda sem pagamento -> 400', semPg.status === 400, 'status=' + semPg.status);
+
+  const qtyNeg = await req('POST', '/api/venda', {
+    id: 'v2e', items: [{ id: 'p2', name: 'Coca', qty: -50 }],
+    payments: [{ method: 'Dinheiro', amount: 0 }], change: 0,
+  }, token);
+  check('quantidade negativa -> 400', qtyNeg.status === 400, 'status=' + qtyNeg.status);
+  check('  estoque nao aumentou com qty negativa',
+    (await req('GET', '/api/produtos?busca=Coca', undefined, token)).dados?.produtos?.[0]?.stock === 2,
+    'stock=' + (await req('GET', '/api/produtos?busca=Coca', undefined, token)).dados?.produtos?.[0]?.stock);
+
+  /* Troco dinheiro a mais e legitimo (nota grande); o troco e sempre do
+   * servidor e nunca pode ser maior que o dinheiro recebido. */
+  const trocoOk = await req('POST', '/api/venda', {
+    id: 'v2f', items: [{ id: 'p2', name: 'Coca', qty: 1 }],
+    payments: [{ method: 'Dinheiro', amount: 100 }], change: 999999,
+  }, token);
+  check('troco do cliente e ignorado, recalculado (90.10)', trocoOk.dados?.venda?.change === 90.1,
+    'troco=' + trocoOk.dados?.venda?.change);
+
+  console.log('\n7c. Data da venda e do servidor');
+  const back = await req('POST', '/api/venda', {
+    id: 'v2g', date: '2020-01-01T00:00:00.000Z', items: [{ id: 'p2', name: 'Coca', qty: 1 }],
+    payments: [{ method: 'Dinheiro', amount: 9.9 }],
+  }, token);
+  check('data antiga do cliente e descartada',
+    back.dados?.venda?.date !== '2020-01-01T00:00:00.000Z', 'date=' + back.dados?.venda?.date);
 
   console.log('\n8. Divergencia de estoque');
   const ov = await req('POST', '/api/venda', {
@@ -275,11 +335,114 @@ try {
   check('/api/sessao devolve o usuario', sess.dados?.usuario?.username === 'admin', JSON.stringify(sess.dados));
   check('/api/sessao nao vaza hash', !JSON.stringify(sess.dados || {}).includes('senhaHash'));
 
-  console.log('\n17. Logout (por ultimo: mata o token)');
+  console.log('\n17. Estorno reverte o financeiro (a entrada que sobrava)');
+  /* A entrada de dinheiro era gravada com `settled: true` no ato da venda, e o
+   * estorno pula o que esta `settled`. Resultado: o estoque voltava e o
+   * dinheiro saia do gaveteiro esperado, mas a "Entrada" de R$ X continuava
+   * no financeiro — o relatorio e a conferencia cebra discordavam do total. */
+  await req('POST', '/api/caixa/abrir', { id: 'TR', opening: 0 }, token);
+  const vd = await req('POST', '/api/venda', {
+    id: 'vEst', items: [{ id: 'p1', name: 'Agua', qty: 1 }],
+    shiftId: 'TR', payments: [{ method: 'Dinheiro', amount: 2.5 }],
+  }, token);
+  check('venda em dinheiro registrada', vd.status === 200, JSON.stringify(vd.dados));
+  const lanAntes = (await req('GET', '/api/entries', undefined, token)).dados?.entries?.filter((e) => e.source === 'vEst').length;
+  check('entrada gravada no financeiro', lanAntes === 1, 'lancamentos=' + lanAntes);
+  check('entrada nasce NAO liquidada (settled=false)',
+    (await req('GET', '/api/entries', undefined, token)).dados?.entries?.find((e) => e.source === 'vEst')?.settled === false);
+  const estFin = await req('POST', '/api/venda/estornar', { id: 'vEst', motivo: 'e2e' }, token);
+  check('estorno aceito', estFin.status === 200, JSON.stringify(estFin.dados));
+  check('  gravou QUEM estornou', !!estFin.dados?.venda?.refundBy, JSON.stringify(estFin.dados?.venda?.refundBy));
+  const lanDepois = (await req('GET', '/api/entries', undefined, token)).dados?.entries?.filter((e) => e.source === 'vEst').length;
+  check('entrada saiu do financeiro junto com o estorno', lanDepois === 0, 'lancamentos=' + lanDepois);
+
+  console.log('\n18. Papel do usuario (quem pode mexer no dinheiro da loja)');
+  /* Cria um "caixa" de verdade no banco para testar o RBAC. */
+  const bdR = new DatabaseSync(DB);
+  const salR = randomBytes(16).toString('hex');
+  const uCaixa = {
+    id: 'uCaixa', username: 'caixa', name: 'Caixa', role: 'caixa', active: true,
+    sal: salR, senhaHash: scryptSync('1234', salR, 64, { N: 16384 }).toString('hex'),
+  };
+  bdR.prepare('INSERT OR REPLACE INTO usuarios (id, username, name, role, active, json) VALUES (?,?,?,?,?,?)')
+    .run(uCaixa.id, uCaixa.username, uCaixa.name, uCaixa.role, 1, JSON.stringify(uCaixa));
+  bdR.close();
+  const lCaixa = await req('POST', '/api/login', { usuario: 'caixa', senha: '1234' });
+  check('login do perfil caixa', lCaixa.status === 200, JSON.stringify(lCaixa.dados));
+  const tCaixa = lCaixa.dados?.token;
+
+  const cfgCaixa = await req('POST', '/api/config', { config: { storeName: 'Hackeado' } }, tCaixa);
+  check('caixa NAO altera a config da loja -> 403', cfgCaixa.status === 403, 'status=' + cfgCaixa.status);
+  check('  e a config continua a de verdade',
+    (await req('GET', '/api/config', undefined, token)).dados?.config?.storeName !== 'Hackeado');
+
+  const prodNeg = await req('POST', '/api/produtos', { lista: [{ id: 'pneg', name: 'Preco negativo', price: -500, stock: 5 }] }, token);
+  check('produto com preco negativo -> 400', prodNeg.status === 400, 'status=' + prodNeg.status);
+  const prodNeg2 = await req('POST', '/api/produtos', { lista: [{ id: 'pneg2', name: 'Estoque negativo', price: 5, stock: -999 }] }, token);
+  check('produto com estoque negativo -> 400', prodNeg2.status === 400, 'status=' + prodNeg2.status);
+  check('  nenhum dos dois foi gravado',
+    !(await req('GET', '/api/base', undefined, token)).dados?.produtos?.some((p) => p.id === 'pneg' || p.id === 'pneg2'));
+
+  /* Estorno de venda alheia: gerente passa, caixa nao.
+   *
+   * A autoria da venda tem de vir da SESSAO. O corpo da requisicao pode
+   * mandar `operatorId` a vontade -- e mandava -- e esse campo e o que decide
+   * quem estorna. Sem o servidor sobrescrever, um caixa carimbava a venda com
+   * o id de outro e a regra saia pela pessoa errada (ou a venda ficava "de
+   * nobody", e ninguem podia estornar nem o proprio caixa). Entao o teste
+   * manda um operatorId falso de proposito e confere que ele foi ignorado. */
+  const bdR2 = new DatabaseSync(DB);
+  const salR2 = randomBytes(16).toString('hex');
+  const uCaixa2 = {
+    id: 'uCaixa2', username: 'caixa2', name: 'Caixa Dois', role: 'caixa', active: true,
+    sal: salR2, senhaHash: scryptSync('1234', salR2, 64, { N: 16384 }).toString('hex'),
+  };
+  bdR2.prepare('INSERT OR REPLACE INTO usuarios (id, username, name, role, active, json) VALUES (?,?,?,?,?,?)')
+    .run(uCaixa2.id, uCaixa2.username, uCaixa2.name, uCaixa2.role, 1, JSON.stringify(uCaixa2));
+  bdR2.close();
+  const tCaixa2 = (await req('POST', '/api/login', { usuario: 'caixa2', senha: '1234' })).dados?.token;
+  check('segundo caixa consegue entrar', !!tCaixa2);
+
+  await req('POST', '/api/venda', {
+    id: 'vAlheia', items: [{ id: 'p1', name: 'Agua', qty: 1 }],
+    operatorId: 'uCaixa', operatorName: 'Caixa Um',   // <- tentativa de forjar
+    payments: [{ method: 'Dinheiro', amount: 2.5 }],
+  }, tCaixa2);
+  const vAlheiaLida = (await req('GET', '/api/vendas', undefined, token)).dados?.vendas?.find((v) => v.id === 'vAlheia');
+  check('operatorId do corpo foi ignorado (vem da sessao)',
+    vAlheiaLida && vAlheiaLida.operatorId === 'uCaixa2', 'operatorId=' + vAlheiaLida?.operatorId);
+  check('operatorName do corpo foi ignorado',
+    vAlheiaLida && vAlheiaLida.operatorName === 'Caixa Dois', 'operatorName=' + vAlheiaLida?.operatorName);
+
+  const estAlheio = await req('POST', '/api/venda/estornar', { id: 'vAlheia', motivo: 'eu quero' }, tCaixa);
+  check('caixa NAO estorna venda de outro operador -> 403', estAlheio.status === 403, 'status=' + estAlheio.status);
+  check('  e a venda continua valendo',
+    (await req('GET', '/api/vendas', undefined, token)).dados?.vendas?.find((v) => v.id === 'vAlheia')?.status !== 'Estornada');
+
+  /* Controle positivo: o dono da venda estorna a propria. Se isso falhasse,
+   * o 403 acima provaria nada -- qualquer um estaria barrado. */
+  await req('POST', '/api/venda', {
+    id: 'vPropria', items: [{ id: 'p1', name: 'Agua', qty: 1 }],
+    payments: [{ method: 'Dinheiro', amount: 2.5 }],
+  }, tCaixa);
+  const estPropria = await req('POST', '/api/venda/estornar', { id: 'vPropria', motivo: 'erro meu' }, tCaixa);
+  check('caixa estorna a PROPRIA venda -> 200', estPropria.status === 200, 'status=' + estPropria.status);
+
+  const estGerente = await req('POST', '/api/venda/estornar', { id: 'vAlheia', motivo: 'gerente pode' }, token);
+  check('gerente estorna qualquer venda', estGerente.status === 200, JSON.stringify(estGerente.dados));
+
+  console.log('\n19. Turno e limite de corpo');
+  check('/api/base devolve os turnos (conferencia cebra)',
+    Array.isArray((await req('GET', '/api/base', undefined, token)).dados?.turnos), JSON.stringify((await req('GET', '/api/base', undefined, token)).dados?.turnos?.map((t) => t.id)));
+  const grande = await req('POST', '/api/produtos', { id: 'g', name: 'x'.repeat(3 * 1024 * 1024) }, token);
+  check('corpo de 3 MB -> 413 (teto de 2 MB)', grande.status === 413, 'status=' + grande.status);
+  check('  motivo nomeado', grande.dados?.codigo === 'corpo_grande', JSON.stringify(grande.dados));
+
+  console.log('\n20. Logout (por ultimo: mata o token)');
   check('logout 200', (await req('POST', '/api/logout', {}, token)).status === 200);
   check('token morto apos logout', (await req('GET', '/api/base', undefined, token)).status === 401);
 
-  console.log('\n18. Rate limit no login');
+  console.log('\n21. Rate limit no login');
   /* A mesma conta, muitas vezes: e o ataque que importa (descobrir a senha
      de admin). A chave e IP+usuario de proposito -- os 5 caixas da loja
      saem do mesmo IP, e um limite so por IP trancaria o caixa legitimo. */
@@ -296,6 +459,20 @@ try {
      admin: cada conta tem a sua propria janela. */
   const outro = await req('POST', '/api/login', { usuario: 'caixa1', senha: 'errada' });
   check('outra conta nao herda a barreira', outro.status === 401, 'status=' + outro.status);
+
+  console.log('\n22. Token na URL so serve para leitura');
+  /* O <img> de export nao manda cabecalho customizado, entao GET aceita o
+   * token na query. POST nao: na URL o token vira log de acesso, historico
+   * do navegador e "estado que mexe em dinheiro pela URL".
+   * O token do admin foi morto na secao 20 e a secao 21 esgotou a janela de
+   * tentativas dele, entao o teste usa a sessao do "caixa", que segue viva. */
+  const tUrl = tCaixa;
+  const tq = await req('GET', '/api/base?token=' + tUrl, undefined);
+  check('GET aceita token na query (export por <img>)', tq.status === 200, 'status=' + tq.status);
+  const tq2 = await req('POST', '/api/produtos?token=' + tUrl, { lista: [{ id: 'purl', name: 'Via URL', price: 1, stock: 1 }] });
+  check('POST NAO aceita token na query -> 401', tq2.status === 401, 'status=' + tq2.status);
+  check('  e nada foi gravado por URL',
+    !(await req('GET', '/api/base', undefined, tUrl)).dados?.produtos?.some((p) => p.id === 'purl'));
 
   console.log('\n' + '='.repeat(46));
   console.log(`  ${ok} passaram, ${fail} falharam`);

@@ -60,6 +60,16 @@ Tudo trafega em HTTP puro na LAN, então o servidor trata o que é gratuito:
   `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`.
 - **Senha no servidor é scrypt**, não o FNV do app antigo. O hash legado
   ainda converte no primeiro login, sem obrigar o gerente a recriar senha.
+- **O dinheiro é conferido no servidor.** Preço, quantidade, soma dos
+  pagamentos e troco são recalculados no servidor; o cliente não decide o
+  valor final. Quantidade negativa e preço/estoque negativo são recusados.
+- **Corpo da requisição tem limite** (2 MB, 64 MB na migração) e **o token não
+  vai na URL** — só em `Authorization: Bearer`, exceto em `GET`/`HEAD`.
+- **Somente admin e gerente** mexem em configuração e estornam venda de outro
+  caixa. Caixa só estorna a própria venda — e **quem vendeu é registrado a
+  partir da sessão**, então o corpo da requisição não consegue forjar a
+  autoria da venda.
+- **Erro 500 não vaza detalhe interno** para o navegador.
 
 ---
 
@@ -71,10 +81,69 @@ COMPILAR-INSTALADOR.bat   # gera dist/Sudam-Gestao-PDV-Setup-1.0.0.exe
 ```
 Cria atalho no menu Iniciar, abre no navegador padrão. Não requer Python.
 
+### Linux — instalador automático (recomendado no mini PC)
+
+```bash
+sudo ./instalar-linux.sh --com-nginx     # instala + HTTPS na porta 443
+sudo ./instalar-linux.sh                  # instala só o serviço (HTTP na 8787)
+sudo ./instalar-linux.sh --desinstalar    # remove, preservando os dados
+```
+
+O script é idempotente: rodar de novo atualiza a instalação e mantém o banco.
+Ele instala como serviço systemd e **não apaga os dados** em nenhum caminho —
+inclusive na desinstalação, porque quem troca de máquina não quer perder a venda
+do dia.
+
+**Pré-requisitos**
+
+```bash
+sudo apt install -y nodejs nginx      # Debian/Ubuntu
+sudo dnf install -y nodejs nginx      # Fedora
+```
+
+Node >= 22.5 (o sistema usa `node:sqlite`). O instalador aceita o Node do
+sistema; um Node instalado via `nvm` (em `/home/...`) **não serve**, porque o
+serviço roda com `ProtectHome=true` e não enxerga o `/home`. Se o seu Node está
+em caminho de usuário, instale o pacote do sistema.
+
+**O que ele faz**
+
+| | |
+|---|---|
+| Usuário de serviço | `sudam`, sem shell e sem login — o Node não roda como root |
+| Binários | `/opt/sudam-pdv` (root, somente leitura para o serviço) |
+| Banco | `/var/lib/sudam-pdv/sudam.db` |
+| Backups | `/var/backups/sudam-pdv/` |
+| Service | `sudam-pdv.service`, reinicia sozinho se cair |
+| Logs | `sudo journalctl -u sudam-pdv -f` |
+
+O serviço é blindado com `ProtectSystem=strict`, `ProtectHome=true`,
+`NoNewPrivileges`, `PrivateDevices` e só pode gravar nas duas pastas de dados.
+O processo escuta em `127.0.0.1` — com `--com-nginx`, a entrada dos caixas é
+`https://IP-DO-SERVIDOR/` e a porta 8787 **não** fica exposta na rede.
+
+**Sobre o HTTPS**: o certificado é autoassinado, então o navegador vai avisar
+na primeira visita — é esperado. Para não ter o aviso, use um domínio com
+certificado real, substituindo o bloco `server` em
+`/etc/nginx/conf.d/sudam-pdv.conf`.
+
+O instalador também guarda o site padrão do nginx antes de assumir a porta 80
+(HTTP redireciona para HTTPS) e o devolve na desinstalação.
+
+**Apontar para outro banco/porta** (sem reinstalar):
+
+```bash
+sudo systemctl edit sudam-pdv
+# [Service]
+# Environment=SUDAM_DB=/mnt/dados/pdv.db
+# Environment=SUDAM_PORTA=8787
+sudo systemctl restart sudam-pdv
+```
+
 ### Manual — Node.js (qualquer Windows)
 ```bash
-# 1. Instale Node.js >= 22 (node:sqlite já vem embutido)
-node --version   # deve ser v22+
+# 1. Instale Node.js >= 22.5 (necessário para node:sqlite)
+node --version   # deve ser v22.5+
 
 # 2. Suba o servidor
 cd servidor
@@ -124,6 +193,79 @@ login com senha scrypt, bloqueio de sessão ausente, gravação de produto e
 cliente, venda em transação, preço vindo do servidor, divergência de estoque,
 idempotência, coleções genéricas, logout e a recusa de servir o `.db`.
 
+São **112 asserções**, incluindo as regressões de segurança: pagamento parcial,
+troco forjado, crédito inflado, quantidade negativa, autoria de venda forjada,
+estorno de venda alheia por caixa, corpo grande demais e token na URL.
+
+No Linux (o `\` vira `/`):
+
+```bash
+node servidor/teste/e2e.mjs /tmp/pdvt "$PWD/servidor"
+```
+
+### Restaurar um backup (testado)
+
+```bash
+node servidor/teste/backup-restaura.mjs /tmp/pdv-r "$PWD/servidor"
+```
+
+21 asserções que fazem o caminho inteiro: popula um banco, grava o backup,
+copia o par `.db`/`-wal` para uma pasta nova, sobe um servidor apontado só para
+essa cópia e confere que voltaram o login do admin, os produtos, o preço, o
+estoque já descontado, o cliente, a venda e o config.
+
+### Fila offline e XSS no frontend (testado)
+
+```bash
+node servidor/teste/api-fila.mjs "$PWD"
+node servidor/teste/frontend-seguro.mjs "$PWD"
+```
+
+`api-fila.mjs` roda o `js/api.js` de verdade num `sandbox` de `localStorage` e
+`fetch` falsos: 27 asserções para a fila de venda quando a internet cai — deque,
+duplo enfileiramento, pílula venenosa, 401 e recusa definitiva.
+
+`frontend-seguro.mjs` (15 asserções) é um guarda de segurança em duas frentes.
+Primeiro, o app monta quase tudo com `innerHTML`, então qualquer campo do banco
+concatenado sem `esc()` vira HTML injetado: o teste varre `js/*.js` e falha se um
+campo de dado (`emoji`, `color`, `address`, `obs`, …) entrar numa linha que monta
+markup sem escape. Segundo, ele falha se algum `.html` tiver `<script>` inline —
+o servidor manda `script-src 'self'`, sem `'unsafe-inline'`, então o navegador
+bloqueia e não avisa. O `index.html` já teve dois blocos assim (o coletor de erro
+e o watchdog que mostra "O sistema não conseguiu iniciar"); nenhum dos dois rodava.
+Ambos foram para `js/boot.js`, que precisa ser o primeiro script da página. O
+teste também confere essa ordem.
+
+O `emoji` do cadastro de produto é texto livre e era renderizado cru em ~15
+lugares (grade do PDV, estoque, relatórios, financeiro). Com o `Content-Security-Policy`
+atual (`script-src 'self'`, `form-action 'self'`, `base-uri 'self'`) um payload
+injetado **não executa JavaScript** — o estrago real era HTML/CSS injetado
+(falsa tela de "sessão expirada", DOM quebrado). Ainda assim foi corrigido, porque
+passa a ser XSS completo se o CSP for afrouxado ou se o app for aberto por
+`file://`, sem cabeçalho nenhum.
+
+### Sincronização de cadastro (testado)
+
+```bash
+node servidor/teste/sync-cadastro.mjs /tmp/pdv-s "$PWD/servidor"
+```
+
+16 asserções: o que o caixa cadastra chega ao servidor e um segundo caixa
+enxerga, com preço e estoque decididos no servidor, reenvio sem duplicar
+(upsert por id) e estorno devolvendo estoque e baixando a dívida do cliente.
+
+Para restaurar de verdade, a mão:
+
+```bash
+sudo systemctl stop sudam-pdv
+sudo cp /var/backups/sudam-pdv/sudam.<carimbo> /var/lib/sudam-pdv/sudam.db
+sudo systemctl start sudam-pdv
+```
+
+O `.db` é copiado antes do `-wal`, nessa ordem — é a ordem segura, porque o WAL
+copiado nunca fica mais velho que o `.db`. Todo backup passa por
+`wal_checkpoint(TRUNCATE)` antes de copiar.
+
 ---
 
 ## Estrutura do projeto
@@ -163,7 +305,11 @@ Node.js 22+ (zero dependências externas — `node:http`, `node:fs`, `node:sqlit
 - **Fiscal:** hoje emite "comprovante não fiscal". NFC-e exige decisão A/B
   (sem fiscal / integrado com provedor) — ver CHECKLIST-PDV.md §2.1
 - **localStorage legado:** dados antigos migram via `Ajustes → Migrar para o servidor`
-- **Backup:** o botão fica no app; o servidor faz snapshot diário automático
+- **Backup:** o botão fica no app; o servidor faz snapshot automático a cada
+  hora, com rotação de 30 dias e backup final no desligamento
+- **Erro não derruba a loja:** exceção não tratada fecha o banco e sai com
+  código de erro; quem reergue é o systemd (`Restart=always`, com limite de 5
+  quedas por minuto para não entrar em laço)
 - **Não versionar:** `dados/`, `*.db`, `node_modules/`, `_backup/`
 
 ---

@@ -446,7 +446,7 @@
     if (!data.length) return '<div class="empty">Sem dados para o gráfico.</div>';
     var max = Math.max.apply(null, data.map(function (d) { return d.v; }).concat([1]));
     return '<div class="bar-list">' + data.map(function (d, i) {
-      var c = d.c || PALETTE[i % PALETTE.length];
+      var c = esc(d.c || PALETTE[i % PALETTE.length]);
       return '<div class="bar-row"><span class="nm" title="' + esc(d.l) + '">' + esc(d.l) + '</span>' +
         '<span class="bar-track"><span class="bar-fill" style="width:' + Math.max(2, (d.v / max) * 100) + '%;background:' + c + '"></span></span>' +
         '<span class="vl">' + (opts.fmt === 'count' ? d.v : money(d.v)) + '</span></div>';
@@ -459,7 +459,7 @@
     var R = 52, C = 2 * Math.PI * R, off = 0;
     var segs = data.map(function (d, i) {
       var frac = d.v / total;
-      var s = '<circle r="' + R + '" cx="70" cy="70" fill="none" stroke="' + (d.c || PALETTE[i % PALETTE.length]) +
+      var s = '<circle r="' + R + '" cx="70" cy="70" fill="none" stroke="' + esc(d.c || PALETTE[i % PALETTE.length]) +
         '" stroke-width="17" stroke-dasharray="' + (frac * C).toFixed(2) + ' ' + C.toFixed(2) +
         '" stroke-dashoffset="' + (-off * C).toFixed(2) + '" transform="rotate(-90 70 70)"><title>' + esc(d.l + ': ' + money(d.v) + ' (' + pct(frac * 100) + ')') + '</title></circle>';
       off += frac;

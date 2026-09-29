@@ -213,10 +213,53 @@ export function obter(db, tabela, id) {
   return l ? JSON.parse(l.json) : null;
 }
 
-export function gravar(db, tabela, obj) {
-  const { sql, args } = sqlDoUpsert(tabela, obj);
+export function gravar(db, tabela, obj, opcoes = {}) {
+  const { sql, args } = sqlDoUpsert(tabela, opcoes.interno ? obj : sanear(tabela, obj));
   db.prepare(sql).run(...args);
   return obj;
+}
+
+/* ---------- saneamento por tabela ----------
+ *
+ * A validacao mora AQUI, e nao nas rotas, por um motivo concreto: `POST
+ * /api/produtos` (rota dedicada) e `POST /api/products` (rota gerica, com
+ * alias em portugues) passam pelo mesmo upsert. Uma regra escrita na rota
+ * dedicada era ignorada pela generica — foi assim que `price: -500` e
+ * `stock: -999` entraram no banco mesmo com a rota dedicada validando.
+ *
+ * Preco negativo faz a venda virar devolucao de dinheiro no gaveteiro;
+ * estoque negativo some do produto na busca. O sistema aceita vender abaixo
+ * do estoque DE PROPITO (divergencia, conferida depois pelo gerente), mas
+ * isso e o resultado da venda, nunca um valor digitado no cadastro.
+ *
+ * `gravarVarios` (usado pela migracao do localStorage) tambem valida, e no
+ * mesmo lugar: `POST /api/produtos` e `POST /api/products` sao rotas
+ * diferentes que terminam no mesmo upsert, e uma regra escrita na rota
+ * dedicada era furada pela outra. Os dados legados passam por `sanear`
+ * assim como o cadastro novo.
+ *
+ * A venda em si NAO valida: e ela que produz o estoque negativo ao vender
+ * mais do que tem, e grava com `{ interno: true }`. Sem essa distincao a
+ * validacao defenderia o cadastro e quebraria a regra da casa.
+ */
+function sanear(tabela, obj) {
+  if (tabela !== 'produtos') return obj;
+  const saida = { ...obj };
+  const preco = Number(saida.price);
+  if (Number.isFinite(preco)) {
+    saida.price = Math.round((preco + Number.EPSILON) * 100) / 100;
+    if (saida.price < 0) throw Object.assign(new Error('Preco nao pode ser negativo.'), { status: 400 });
+  }
+  const estoque = Number(saida.stock);
+  if (Number.isFinite(estoque)) {
+    saida.stock = Math.round((estoque + Number.EPSILON) * 100) / 100;
+    if (saida.stock < 0) throw Object.assign(new Error('Estoque nao pode ser negativo no cadastro.'), { status: 400 });
+  }
+  /* Texto sem teto vira peso morto: o .db inteiro e copiado a cada hora. */
+  for (const campo of ['name', 'code', 'category', 'barcode', 'supplier']) {
+    if (typeof saida[campo] === 'string' && saida[campo].length > 500) saida[campo] = saida[campo].slice(0, 500);
+  }
+  return saida;
 }
 
 /* ---------- acesso generico por colecao ---------- */
@@ -241,17 +284,22 @@ export function gravarVarios(db, tabela, lista) {
   const sql = `INSERT INTO ${tabela} (${nomes.join(', ')}) VALUES (${marcadores})
                ON CONFLICT(id) DO UPDATE SET json = excluded.json${atualiza ? ', ' + atualiza : ''}`;
   const st = db.prepare(sql);
-  const linhas = lista.map((obj) => [obj.id, ...cols.map((c) => valorColuna(c, obj)), JSON.stringify(obj)]);
   const propria = !emTransacao(db);
   if (propria) db.exec('BEGIN');
   try {
-    for (const args of linhas) st.run(...args);
+    for (const obj of lista) st.run(...linhaDe(tabela, obj));
     if (propria) db.exec('COMMIT');
   } catch (e) {
     if (propria) db.exec('ROLLBACK');
     throw e;
   }
   return lista.length;
+}
+
+function linhaDe(tabela, obj) {
+  const limpo = sanear(tabela, obj);
+  const cols = colunas(tabela);
+  return [limpo.id, ...cols.map((c) => valorColuna(c, limpo)), JSON.stringify(limpo)];
 }
 
 export function remover(db, tabela, id) {

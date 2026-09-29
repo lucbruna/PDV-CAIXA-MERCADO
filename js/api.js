@@ -25,6 +25,7 @@
   var CHAVE_PEND = 'sudam_pendentes';
   var CHAVE_MIGRADO = 'sudam_migrado';
   var CHAVE_EXPIRA = 'sudam_sessao_expira';
+  var CHAVE_REJEITADOS = 'sudam_rejeitados';
 
   var estado = {
     online: false,        // o servidor respondeu na ultima sondagem
@@ -103,6 +104,50 @@
   }
 
   function pendentes() { return lerPendentes().length; }
+
+  /* ---------------- o que o servidor recusou de vez ----------------
+   * A fila de reenvio e para o que o servidor ainda PODE aceitar. Quando ele
+   * recusa de forma definitiva (400/409 -- produto apagado, total invalido),
+   * deixar o item na fila e pior do que parece: ele volta para a FRENTE a
+   * cada tentativa, e como o reenvio para no primeiro erro, aquele item
+   * sozinho bloqueia para sempre todos os outros. A loja ficaria achando que
+   * sincronizou enquanto nenhuma venda antiga sobe.
+   * Aqui o item sai da fila e fica guardado, com o motivo, para o gerente ver
+   * e resolver. Nada e apagado em silencio. */
+  function lerRejeitados() {
+    try {
+      var v = JSON.parse(localStorage.getItem(CHAVE_REJEITADOS) || '[]');
+      return Array.isArray(v) ? v : [];
+    } catch (e) { return []; }
+  }
+
+  function guardarRejeitados(lista) {
+    try { localStorage.setItem(CHAVE_REJEITADOS, JSON.stringify(lista.slice(0, 200))); }
+    catch (e) { /* cota cheia */ }
+  }
+
+  function rejeitar(item, motivo) {
+    var l = lerRejeitados();
+    l.push({
+      tipo: item.tipo,
+      dados: item.dados,
+      em: item.em,
+      motivo: motivo || 'recusado pelo servidor',
+      rejeitadoEm: new Date().toISOString(),
+    });
+    guardarRejeitados(l);
+  }
+
+  function rejeitados() { return lerRejeitados().length; }
+
+  /* Devolve o item ao FIM da fila. Nao ao começo: no começo, um item que o
+   * servidor recusa (ou que ainda nao subiu por falta de rede) segura a fila
+   * inteira na frente dele. */
+  function reenfileirar(item) {
+    var l = lerPendentes();
+    l.push(item);
+    guardarPendentes(l);
+  }
 
   /* ---------------- nucleo HTTP ---------------- */
 
@@ -252,8 +297,12 @@
 
   /* Envia uma venda. NUNCA lanca: devolve sempre {ok, ...} e, em falha de
      rede, enfileira para reenvio. O caixa nao pode ver erro por causa do
-     servidor depois de entregar a mercadoria. */
-  function venda(v) {
+     servidor depois de entregar a mercadoria.
+     `semEnfileirar` existe para o proprio reenvio: quando o item ja está na
+     fila, deixar o `venda()` enfileirar de novo cria uma segunda cópia do
+     mesmo registro e a fila dobra a cada tentativa. */
+  function venda(v, opcoes) {
+    opcoes = opcoes || {};
     return req('POST', '/api/venda', v).then(function (r) {
       if (r.status === 200) {
         estado.online = true;
@@ -265,32 +314,61 @@
         return { ok: false, erro: r.dados.erro, semSessao: true };
       }
       if (r.status === 0) {
-        enfileirar('venda', v);
-        return { ok: false, enfileirada: true, erro: 'Servidor fora do ar — venda guardada para enviar depois.' };
+        if (!opcoes.semEnfileirar) enfileirar('venda', v);
+        return {
+          ok: false,
+          servidorFora: true,
+          enfileirada: !opcoes.semEnfileirar,
+          erro: 'Servidor fora do ar — venda guardada para enviar depois.',
+        };
       }
-      // 409 (produto sumiu) e 400 sao recusa definitiva: nao enfileira,
-      // senao o servidor reprocessaria uma venda que ele ja recusou.
-      return { ok: false, erro: r.dados.erro, codigo: r.dados.codigo };
+      /* 400/409 e recusa definitiva: o servidor ja decidiu que esse registro
+         nao entra. Guardar na fila so faria ele voltar sempre. Erro 5xx, ao
+         contrario, e problema do servidor e vale tentar de novo. */
+      var definitivo = r.status >= 400 && r.status < 500;
+      if (!definitivo && !opcoes.semEnfileirar) enfileirar('venda', v);
+      return {
+        ok: false,
+        definitivo: definitivo,
+        enfileirada: !definitivo && !opcoes.semEnfileirar,
+        erro: r.dados.erro,
+        codigo: r.dados.codigo,
+        status: r.status,
+      };
     });
   }
 
   /* Estorno vai ao servidor antes de confidentemente. O servidor devolve o
      estoque, baixa a divida e tira do turno; se ele nao souber do estorno, os
      outros 4 caixas continuam vendo a mercadoria como disponivel. */
-  function estornar(vendaId, motivo) {
+  function estornar(vendaId, motivo, opcoes) {
+    opcoes = opcoes || {};
     return req('POST', '/api/venda/estornar', { id: vendaId, motivo: motivo }, undefined, 10000)
       .then(function (r) {
         if (r.status === 200) { estado.online = true; return { ok: true, venda: r.dados.venda }; }
-        if (r.status === 0) { enfileirar('estorno', { id: vendaId, motivo: motivo }); return { ok: false, enfileirada: true }; }
-        if (r.status === 401) { guardarToken(null); estado.autenticado = false; return { ok: false, erro: r.dados.erro, semSessao: true }; }
-        return { ok: false, erro: r.dados.erro };
+        if (r.status === 401) { guardarToken(null); estado.autenticado = false; return { ok: false, semSessao: true, erro: r.dados.erro }; }
+        if (r.status === 0) {
+          if (!opcoes.semEnfileirar) enfileirar('estorno', { id: vendaId, motivo: motivo });
+          return { ok: false, servidorFora: true, enfileirada: !opcoes.semEnfileirar };
+        }
+        var definitivo = r.status >= 400 && r.status < 500;
+        if (!definitivo && !opcoes.semEnfileirar) enfileirar('estorno', { id: vendaId, motivo: motivo });
+        return { ok: false, definitivo: definitivo, enfileirada: !definitivo && !opcoes.semEnfileirar, erro: r.dados.erro, status: r.status };
       });
   }
 
-  function salvar(colecao, lista) {
+  function salvar(colecao, lista, opcoes) {
+    opcoes = opcoes || {};
     return req('POST', '/api/' + colecao, { lista: lista }).then(function (r) {
-      if (r.status === 0) { enfileirar(colecao, lista); return { ok: false, enfileirada: true }; }
-      return { ok: r.status === 200, gravados: r.dados.gravados };
+      if (r.status === 200) return { ok: true, gravados: r.dados.gravados };
+      if (r.status === 0) {
+        if (!opcoes.semEnfileirar) enfileirar(colecao, lista);
+        return { ok: false, servidorFora: true, enfileirada: !opcoes.semEnfileirar };
+      }
+      if (r.status === 401) { guardarToken(null); estado.autenticado = false; return { ok: false, semSessao: true, erro: r.dados.erro }; }
+      var definitivo = r.status >= 400 && r.status < 500;
+      if (!definitivo && !opcoes.semEnfileirar) enfileirar(colecao, lista);
+      return { ok: false, definitivo: definitivo, enfileirada: !definitivo && !opcoes.semEnfileirar, erro: r.dados.erro, status: r.status };
     });
   }
 
@@ -322,36 +400,85 @@
   }
 
   /* Reenvia o que ficou na fila. Chamado ao abrir o app e depois de cada
-     venda, para a fila nao crescer em silencio. */
+     venda, para a fila nao crescer em silencio.
+     IMPORTANTE: aqui cada envio e uma Promise, e a resposta so existe DEPOIS
+     do await. A versao anterior testava `p.ok` direto no objeto da Promise --
+     que da `undefined` sempre. Consequencia: nenhum item nunca contava como
+     enviado, o loop parava no primeiro e devolvia o item para a frente da
+     fila. A fila nao esvaziava NUNCA, e a tela dizia "X ainda na fila" para
+     sempre, achando que tinha sincronizado. As vendas feitas durante a queda
+     de rede nunca chegavam ao servidor. */
   function reenviar() {
-    if (!lerToken()) return Promise.resolve({ ok: false, pendentes: pendentes() });
-    if (estado.verificando) return Promise.resolve({ ok: false, pendentes: pendentes() });
+    if (!lerToken()) return Promise.resolve({ ok: false, pendentes: pendentes(), motivo: 'sem sessao' });
+    if (estado.verificando) return Promise.resolve({ ok: false, pendentes: pendentes(), motivo: 'ja rodando' });
     estado.verificando = true;
+
+    var enviados = 0;
+    var recusados = 0;
+    var parar = null;
 
     function passo() {
       var item = desenfileirar();
-      if (!item) return Promise.resolve({ ok: true, enviados: 0, restam: 0 });
+      if (!item) return Promise.resolve();
+
       var p = item.tipo === 'venda'
-        ? venda(item.dados)
+        ? venda(item.dados, { semEnfileirar: true })
         : item.tipo === 'estorno'
-        ? estornar(item.dados.id, item.dados.motivo)
-        : salvar(item.tipo, [].concat(item.dados));
-      if (p && p.ok) return passo().then(function (r) {
-        r.enviados = (r.enviados || 0) + 1;
-        return r;
+        ? estornar(item.dados.id, item.dados.motivo, { semEnfileirar: true })
+        : salvar(item.tipo, [].concat(item.dados), { semEnfileirar: true });
+
+      return p.then(function (r) {
+        if (r && r.ok) { enviados++; return passo(); }
+
+        /* Servidor fora do ar: nao adianta tentar os 500 itens, todos vao
+         * falhar do mesmo jeito. Devolve este ao fim da fila e encerra. */
+        if (r && r.servidorFora) {
+          reenfileirar(item);
+          parar = 'servidor fora do ar';
+          return;
+        }
+
+        /* Sessao morreu no meio: o caixa precisa entrar de novo. O item volta
+         * para a fila (nao e recusa do dado) e a sincronizacao para. */
+        if (r && r.semSessao) {
+          reenfileirar(item);
+          parar = 'sessao expirada';
+          avisarSessaoCaiu();
+          return;
+        }
+
+        /* Recusa definitiva (400/409): este registro nao vai passar nunca.
+         * Sai da fila para a lista de rejeitados com o motivo, senao ele
+         * trava a fila inteira na frente. */
+        if (r && r.definitivo) {
+          recusados++;
+          rejeitar(item, r.erro || r.codigo);
+          return passo();
+        }
+
+        /* Falha inesperada: devolve ao fim e para. Melhor repetir depois do
+         * que perder o registro. */
+        reenfileirar(item);
+        parar = (r && r.erro) || 'falha ao reenviar';
+      }, function (e) {
+        reenfileirar(item);
+        parar = (e && e.message) || 'excecao no reenvio';
       });
-      // Falhou de novo: devolve para o fim da fila e para por agora.
-      if (p && p.enfileirada) return Promise.resolve({ ok: false, enviados: 0, restam: pendentes() });
-      guardarPendentes([item].concat(lerPendentes()));
-      return Promise.resolve({ ok: false, enviados: 0, restam: pendentes() });
     }
 
-    return passo().then(function (r) {
+    return passo().then(function () {
       estado.verificando = false;
-      return r;
+      return {
+        ok: enviados > 0 || (!parar && recusados === 0),
+        enviados: enviados,
+        recusados: recusados,
+        restam: pendentes(),
+        rejeitados: rejeitados(),
+        motivo: parar,
+      };
     }).catch(function () {
       estado.verificando = false;
-      return { ok: false, restam: pendentes() };
+      return { ok: false, enviados: enviados, recusados: recusados, restam: pendentes(), rejeitados: rejeitados() };
     });
   }
 
@@ -373,5 +500,6 @@
     migrado: migrado,
     reenviar: reenviar,
     pendentes: pendentes,
+    rejeitados: rejeitados,
   };
 })(window);

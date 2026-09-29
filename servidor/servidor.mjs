@@ -9,6 +9,8 @@
  * chamada a um servidor de rede. Os 5 caixas abrem http://IP-DO-MINI-PC:8787.
  */
 import { createServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
+import { readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +18,7 @@ import { networkInterfaces } from 'node:os';
 import * as banco from './banco.mjs';
 import { gerarHash, conferir, hashAntigo, criarSessao, usuarioDaSessao, encerrarSessao, iniciarSessoes, renovarSessao } from './auth.mjs';
 import { registrarVenda, estornarVenda, proximoSeq } from './venda.mjs';
-import { iniciarBackup } from './backup.mjs';
+import { iniciarBackup, fazerBackupAgora } from './backup.mjs';
 
 const aqui = dirname(fileURLToPath(import.meta.url));
 const RAIZ_APP = join(aqui, '..');
@@ -73,6 +75,15 @@ function limparTentativa(req, usuario) {
   TENTATIVAS.delete(chaveTentativa(req, usuario));
 }
 
+/* O mapa cresce sem teto se ninguem limpar: cada par IP+usuario novo numa
+ * rede com varios IPs dinamicos (celular no Wi-Fi da loja) deixa uma entrada
+ * parada. A janela de 5 min expiraria na logica, mas a entrada continua na
+ * memoria ate la passar — e um atacante so precisa variar o IP. */
+setInterval(() => {
+  const agora = Date.now();
+  for (const [k, reg] of TENTATIVAS) if (agora > reg.ate) TENTATIVAS.delete(k);
+}, 60 * 1000).unref?.();
+
 function json(res, dados, codigo = 200) {
   const corpo = JSON.stringify(dados);
   res.writeHead(codigo, {
@@ -83,15 +94,59 @@ function json(res, dados, codigo = 200) {
   res.end(corpo);
 }
 
+/* Erro 500 nao pode vazar o motivo interno para a rede: `e.message` de uma
+ * excecao do SQLite traz caminho de arquivo, nome de tabela e sometimes o
+ * SQL — informacao que ajuda quem esta sondando a porta. O log no console
+ * continua completo; o cliente recebe so um texto generico e o `codigo`,
+ * que e controlado pelo servidor. */
 function erro(res, e) {
   const codigo = e && e.status ? e.status : 500;
+  /* Handler pode ter morrido DEPOIS de comecar a resposta (ex.: o cliente
+     fecha a conexao no meio do JSON.stringify). Chamar writeHead de novo
+     lanca ERR_HTTP_HEADERS_SENT, e essa excecao sai do catch do `tratar`
+     como promessa rejeitada sem tratamento — o processo inteiro cai e o PDV
+     dos 5 caixas para. Checar antes e o que impede isso. */
+  if (res.headersSent || res.writableEnded) {
+    try { res.destroy(); } catch {}
+    return;
+  }
   if (codigo >= 500) console.error('[erro]', e);
-  json(res, { erro: (e && e.message) || 'Erro interno', codigo: e && e.codigo }, codigo);
+  const mensagem =
+    codigo >= 500 ? 'Erro interno do servidor. Tente novamente.' : (e && e.message) || 'Erro interno';
+  json(res, { erro: mensagem, codigo: e && e.codigo }, codigo);
 }
 
-async function corpo(req) {
+/* Teto do corpo da requisicao. Sem isto, qualquer coisa da rede local pode
+ * mandar um POST de 2 GB e o servidor acumula tudo em memoria ate o mini PC
+ * trocar os 5 caixas -- que e exatamente o downtime que o backup automatico
+ * nao cobre, porque o processo morre antes de fechar o banco. A migracao
+ * e a unica rota legitimamente grande (sobe o localStorage inteiro), por isso
+ * o limite dela e maior. */
+const CORPO_PADRAO = 2 * 1024 * 1024;
+const CORPO_MIGRACAO = 64 * 1024 * 1024;
+
+async function corpo(req, limite = CORPO_PADRAO) {
   const pedacos = [];
-  for await (const p of req) pedacos.push(p);
+  let tamanho = 0;
+  let estourou = false;
+  for await (const p of req) {
+    tamanho += p.length;
+    if (tamanho > limite) {
+      /* Estourou: continua consumindo o resto em vez de sair na hora. Se o
+       * handler responder e fechar com o corpo pela metade no socket, o
+       * Node descarta a conexao keep-alive e o proximo pedido do mesmo
+       * cliente morre com ECONNRESET — o "erro" que o caixa ve seria o
+       * limite de corpo, e nao a proxima venda. Esvaziar o stream mantem a
+       * conexao saudavel e o 413 chega como resposta normal. */
+      estourou = true;
+      pedacos.length = 0;
+      continue;
+    }
+    pedacos.push(p);
+  }
+  if (estourou) {
+    throw Object.assign(new Error('Corpo grande demais.'), { status: 413, codigo: 'corpo_grande' });
+  }
   if (!pedacos.length) return {};
   try { return JSON.parse(Buffer.concat(pedacos).toString('utf8')); }
   catch { throw Object.assign(new Error('Corpo invalido.'), { status: 400 }); }
@@ -112,6 +167,26 @@ function semente() {
   };
 }
 
+/* ---------------- papeis ----------------
+ *
+ * Antes o papel so servia para o teto de desconto do /api/venda. Todo o resto
+ * aceitava qualquer sessao valida: um usuario "caixa" podia reescrever a
+ * config global da loja (destravar venda sem cliente no crediario, zerar o
+ * desconto maximo) e estornar a venda de outro caixa, sem registro de quem.
+ * A config e o estorno mexem no dinheiro e nas regras da loja — nao sao do
+ * dia a dia do operador de balcao.
+ */
+const GERENTES = new Set(['admin', 'gerente']);
+
+function ehGerente(usuario) {
+  return !!usuario && GERENTES.has(String(usuario.role || '').toLowerCase());
+}
+
+function exigeGerente(res, oQue) {
+  json(res, { erro: `Seu perfil nao pode ${oQue}.` }, 403);
+  return null;
+}
+
 /* ---------------- autenticacao ----------------
  *
  * Todo /api exige senao o token do /api/login. Antes disso qualquer
@@ -126,9 +201,16 @@ const ROTAS_PUBLICAS = new Set(['POST /api/login', 'GET /api/status', 'POST /api
 function tokenDoRequisicao(req, url) {
   const cab = req.headers['authorization'] || '';
   if (/^Bearer\s+/i.test(cab)) return cab.replace(/^Bearer\s+/i, '').trim();
-  // Fallback para query string: usar o token no cabecalho e o certo, mas
-  // alguns clientes de rede (e o <img> de export) nao enviam custom header.
-  return url.searchParams.get('token') || null;
+  /* Fallback para query string, SO em GET/HEAD: e o caminho que o <img> de
+   * export usa (nao ha como mandar cabecalho customizado numa tag de imagem).
+   * Restringir a GET e HEAD e o que importa: token na URL vaza em log de
+   * acesso, em proxy e no historico do navegador, e num POST ele viraria
+   * "estado que muda dinheiro pela URL" — basta um linklogado para virar
+   * venda nao autorizada. Leitura nao mexe em nada. */
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    return url.searchParams.get('token') || null;
+  }
+  return null;
 }
 
 /* A migracao e a unica rota de escrita liberada sem sessao, e apenas
@@ -227,14 +309,24 @@ rota('GET', '/api/base', async (req, res) => {
       .listar(db, 'usuarios')
       .map(({ passHash, senhaHash, sal, ...u }) => u),
     proximoSeq: proximoSeq(db),
+    /* Turnos entram aqui porque e o unico lugar onde o servidor tem o
+     * `cashExpected` — o numero que a conferencia cebra compara com a
+     * contagem do gaveteiro. Sem voltar ele, o caixa que recarrega a pagina
+     * (ou o mini PC que reinicia) abre o turno com R$ 0 esperado e a
+     * conferencia nao tem contra o que conferir. */
+    turnos: banco.listar(db, 'turnos'),
   });
 });
 
 /* Historico nao vem inteiro: 5 mil vendas nao cabem na memoria de um caixa.
    O cliente pede a janela de que precisa. */
 rota('GET', '/api/vendas', async (req, res, url) => {
-  const limite = Math.min(Number(url.searchParams.get('limite')) || 500, 2000);
-  const offset = Number(url.searchParams.get('offset')) || 0;
+  /* `Math.min(Number(limite) || 500, 2000)`: com limite negativo o Math.min
+   * devolvia o proprio negativo e o SQLite tratava `LIMIT -5` como "sem
+   * limite" — a rota que existe para nao carregar 5 mil vendas na memoria do
+   * caixa passava a carregar tudo. */
+  const limite = Math.min(Math.max(Number(url.searchParams.get('limite')) || 500, 1), 2000);
+  const offset = Math.max(Number(url.searchParams.get('offset')) || 0, 0);
   const de = url.searchParams.get('de');
   const ate = url.searchParams.get('ate');
   let sql = 'SELECT json, divergencia FROM vendas';
@@ -276,26 +368,43 @@ rota('POST', '/api/venda', async (req, res) => {
   const TETO = { admin: Infinity, gerente: 50, caixa: 0, estoque: 0 };
   const perfil = (req.usuario && req.usuario.role) || 'caixa';
   const teto = TETO[perfil] === undefined ? 0 : TETO[perfil];
-  const r = registrarVenda(db, venda, { loyalty: cfg.loyalty, tetoDesconto: teto });
+    const r = registrarVenda(db, venda, { loyalty: cfg.loyalty, tetoDesconto: teto, operador: req.usuario });
   json(res, r);
 });
 
 /* Estorno: devolve estoque, baixa a divida, tira do turno. Idempotente —
    chamar duas vezes devolve o estoque uma vez so. */
 rota('POST', '/api/venda/estornar', async (req, res) => {
+  /* O corpo e lido UMA vez: `req` e um stream, e uma segunda leitura volta
+   * vazia. */
   const { id, motivo } = await corpo(req);
+  const usuario = req.usuario || {};
   if (!id) throw Object.assign(new Error('Informe o id da venda.'), { status: 400 });
   if (!motivo || !String(motivo).trim()) {
     throw Object.assign(new Error('O motivo do estorno e obrigatorio.'), { status: 400 });
   }
-  const r = estornarVenda(db, id, String(motivo).trim());
+  /* Estorno de venda alheia: gerente livre, operador so a propria venda.
+   * Um caixa que derruba a venda do colega apaga a venda sem o colleague
+   * saber — e o `motivo` nao impede, porque o motivo e texto livre. */
+  if (!ehGerente(usuario)) {
+    const alvo = banco.obter(db, 'vendas', String(id));
+    const minha = alvo && String(alvo.operatorId || '') === String(usuario.id || '');
+    if (!minha) return exigeGerente(res, 'estornar venda de outro caixa');
+  }
+  const r = estornarVenda(db, String(id), String(motivo).trim(), { por: usuario });
   json(res, r);
 });
 
 /* Estas duas rotas usavam req.lista em vez do corpo ja lido: req e o objeto
    cru do Node, entao `Array.isArray(req.lista)` era sempre false e caia em
    [undefined], quebrando no gravar(). Toda rota de escrita passa por
-   `corpo(req)`. */
+   `corpo(req)`.
+
+   A validacao do produto (preco/estoque sem negativo) fica em banco.mjs, e
+   nao aqui: `POST /api/produtos` e `POST /api/products` sao rotas diferentes
+   que terminam no mesmo upsert, e uma regra escrita aqui era furada pela
+   outra. */
+
 rota('POST', '/api/produtos', async (req, res) => {
   const d = await corpo(req);
   const lista = Array.isArray(d.lista) ? d.lista : (d.lista ? [d.lista] : [d]);
@@ -333,9 +442,12 @@ rota('POST', '/api/clientes', async (req, res) => {
 
 rota('POST', '/api/caixa/abrir', async (req, res) => {
   const t = await corpo(req);
+  /* Abertura guarda QUEM abriu. O estorno compara este campo para saber se o
+   * operador pode derrubar a venda. Sem ele, todo mundo pode derrubar tudo. */
   const turno = {
     id: t.id || 'T' + Date.now(),
-    operatorId: t.operatorId || null,
+    operatorId: t.operatorId || (req.usuario && req.usuario.id) || null,
+    operator: t.operator || (req.usuario && req.usuario.name) || null,
     openedAt: new Date().toISOString(),
     closedAt: null,
     opening: Number(t.opening) || 0,
@@ -366,7 +478,7 @@ rota('POST', '/api/caixa/fechar', async (req, res) => {
  * Publica apenas enquanto o banco nao tiver nenhum usuario (primeira
  * instalacao); depois disso ela exige sessao, como todo o resto. */
 rota('POST', '/api/migrar', async (req, res) => {
-  const d = await corpo(req);
+  const d = await corpo(req, CORPO_MIGRACAO);
   const contagem = {};
   db.exec('BEGIN');
   try {
@@ -435,13 +547,15 @@ for (const nome of COLECOES) {
     json(res, { gravados: n });
   });
 
-  /* Alias so no POST. O GET dedicado de /api/produtos (que aceita ?busca=)
-     foi declarado antes deste laco e e mais rico que a listagem generica;
-     sobrescreve-lo aqui perderia a busca. O POST nao tinha equivalente
-     dedicado util, e o handler generico faz o mesmo upsert. */
+  /* Alias so no POST, e SEMPRE sem sobrescrever: as rotas dedicadas de
+   * /api/produtos e /api/clientes ja foram declaradas acima e sao as
+   * verdadeiras. Antes o `rotas.set` apagava a rota dedicada e deixava a
+   * generica no lugar — invisivel para quem lia o codigo, e a razao de uma
+   * validacao em uma rota ser furada pela outra. */
   const pt = Object.keys(ALIAS).find((k) => ALIAS[k] === nome);
   if (pt && pt !== nome) {
-    rotas.set(`POST /api/${pt}`, rotas.get(`POST /api/${nome}`));
+    const chavePt = `POST /api/${pt}`;
+    if (!rotas.has(chavePt)) rotas.set(chavePt, rotas.get(`POST /api/${nome}`));
   }
 }
 
@@ -462,6 +576,9 @@ rota('GET', '/api/config', async (req, res) => {
 });
 
 rota('POST', '/api/config', async (req, res) => {
+  /* Config e regra da loja (desconto maximo, exigir cliente no crediario,
+   * modo de balcao). Mudar isso nao e tarefa de quem esta no balcao. */
+  if (!ehGerente(req.usuario)) return exigeGerente(res, 'alterar a configuracao da loja');
   const d = await corpo(req);
   const cfg = d.config && typeof d.config === 'object' ? d.config : d;
   delete cfg.pix; // segredo do Pix nunca sobe cru pelo corpo da config
@@ -551,8 +668,45 @@ async function servirEstatico(req, res, url) {
   }
 }
 
-const servidor = createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+/* ---------------- HTTPS opcional ----------------
+ *
+ * Num PDV de LAN isolada, HTTP e aceitavel. Mas se a maquina estiver
+ * atras de um roteador com port forwarding, ou se alguem acessar por
+ * VPN, o token de sessao e a senha do admin trafegam em texto puro.
+ *
+ * Ligar e opcional e por ambiente: SUDAM_TLS=1 com SUDAM_CERT e
+ * SUDAM_KEY apontando para um .pem. Sem essas duas, o servidor avisa e
+ * sobe em HTTP mesmo assim -- recusar outright deixaria o PDV sem
+ * funcionar num micro que o usuario ainda nao configurou.
+ */
+function opcoesTls() {
+  if (process.env.SUDAM_TLS !== '1') return null;
+  const cert = process.env.SUDAM_CERT;
+  const key = process.env.SUDAM_KEY;
+  if (!cert || !key) {
+    console.warn('  AVISO: SUDAM_TLS=1 mas SUDAM_CERT/SUDAM_KEY nao definidos.');
+    console.warn('  Subindo em HTTP mesmo assim (so e seguro em rede isolada).');
+    return null;
+  }
+  try {
+    return { cert: readFileSync(cert), key: readFileSync(key) };
+  } catch (e) {
+    console.warn('  AVISO: nao consegui ler o certificado (' + e.message + ').');
+    console.warn('  Subindo em HTTP mesmo assim.');
+    return null;
+  }
+}
+
+/* Onde escutar. 0.0.0.0 e o certo numa loja (os 5 caixas precisam
+ * entrar), mas e tambem o que expoe o servidor para a internet se
+ * alguem redirigir a porta no roteador. SUDAM_HOST permite prender numa
+ * interface especifica quando so a rede local importa. */
+const HOST = process.env.SUDAM_HOST || '0.0.0.0';
+const tls = opcoesTls();
+const PROTOCOLO = tls ? 'https' : 'http';
+
+async function tratar(req, res) {
+  const url = new URL(req.url, `${PROTOCOLO}://${req.headers.host || 'localhost'}`);
   const chave = `${req.method} ${url.pathname}`;
   const fn = rotas.get(chave);
   try {
@@ -568,11 +722,29 @@ const servidor = createServer(async (req, res) => {
   } catch (e) {
     erro(res, e);
   }
-});
+}
 
+const servidor = tls
+  ? createHttpsServer(tls, tratar)
+  : createServer(tratar);
+
+/* Isto aqui e SO decoracao do terminal: mostra os IPs para o gerente digitar
+ * nos caixas. Nao tem nenhuma funcao no sistema -- e o servidor ja esta
+ * escutando e vendendo quando isto roda. E mesmo assim `os.networkInterfaces()`
+ * pode lancar: no WSL, em container restrito e com alguns drivers de VPN ele
+ * falha com uv_interface_addresses. Como a chamada estava solta, uma
+ * enumeracao de placa de rede derrubava a loja inteira depois de subir.
+ * Falhar bonito e melhor do que derrubar o caixa. */
 function ipsLocais() {
   const out = [];
-  for (const lista of Object.values(networkInterfaces())) {
+  let mapa;
+  try {
+    mapa = networkInterfaces();
+  } catch (e) {
+    console.log('  (nao deu para listar os enderecos de rede: ' + e.message + ')');
+    return out;
+  }
+  for (const lista of Object.values(mapa || {})) {
     for (const i of lista || []) {
       if (i.family === 'IPv4' && !i.internal) out.push(i.address);
     }
@@ -580,11 +752,78 @@ function ipsLocais() {
   return out;
 }
 
-servidor.listen(PORTA, '0.0.0.0', () => {
+servidor.listen(PORTA, HOST, () => {
   banco.gravarMeta(db, 'versao', '1.0.0');
-  console.log('Sudam Gestao PDV - servidor no ar');
-  console.log('  neste PC:  http://localhost:' + PORTA);
-  for (const ip of ipsLocais()) console.log('  na rede:   http://' + ip + ':' + PORTA);
-  console.log('  dados em: ' + banco.caminhoBanco());
-  console.log('  ' + ipsLocais().length + ' endereco(s) de rede -- anote o que aparece em "na rede".');
+  /* Nada do que vem a seguir pode derrubar o processo: e informacao de
+   * diagnostico, escrita depois do "no ar". */
+  try {
+    const ips = ipsLocais();
+    console.log('Sudam Gestao PDV - servidor no ar');
+    console.log('  neste PC:  ' + PROTOCOLO + '://localhost:' + PORTA);
+    for (const ip of ips) console.log('  na rede:   ' + PROTOCOLO + '://' + ip + ':' + PORTA);
+    console.log('  escutando: ' + HOST + ':' + PORTA + (tls ? ' (TLS)' : ' (sem TLS)'));
+    console.log('  dados em: ' + banco.caminhoBanco());
+    console.log('  ' + ips.length + ' endereco(s) de rede -- anote o que aparece em "na rede".');
+    if (!tls) {
+      console.log('');
+      console.log('  ATENCAO: sem HTTPS. Numa rede isolada da loja isso e aceitavel.');
+      console.log('  Se a maquina estiver acessivel pela internet, gere um certificado');
+      console.log('  e ligue SUDAM_TLS=1 + SUDAM_CERT + SUDAM_KEY (ver README).');
+    }
+  } catch (e) {
+    console.error('  (falha ao escrever o resumo de rede: ' + e.message + ')');
+  }
 });
+
+/* ---------------- sobreviver a falha ----------------
+ *
+ * Este processo e a loja inteira: se ele cai, os 5 caixas param de vender ate
+ * alguem notar e religar o mini PC. O padrao do Node 22+ e encerrar o
+ * processo em `uncaughtException`/`unhandledRejection` — bom para um servidor
+ * na nuvem que alguem monitora, ruim para o PDV de um mercadinho. Aqui a
+ * falha e registrada e o servidor continua de pe; o que nao da para recuperar
+ * (estado corrompido em memoria) e no caso raro de nao dar para seguir.
+ */
+process.on('unhandledRejection', (motivo) => {
+  console.error('[promessa rejeitada]', motivo);
+});
+/* Uma excecao nao tratada nao significa "so um log": o estado em memoria pode
+ * ja estar inconsistente (meio de gravacao begun, transacao aberta, sequencia
+ * lida fora de ordem). Continuar vendendo sobre esse estado e a forma de
+ * transformar um erro em dados corrompidos. O Node tambem avisa disso na
+ * documentacao. Entao: registra, fecha o banco com o que da, e sai com codigo
+ * de erro. Quem reergue e o systemd (Restart=always), e ai o processo novo
+ * comeca do banco em disco, que esta integro. */
+process.on('uncaughtException', (e) => {
+  console.error('[excecao na tratada]', e);
+  try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
+  try { db.close(); } catch {}
+  process.exit(1);
+});
+process.on('unhandledRejection', (e) => {
+  console.error('[promessa rejeitada sem tratamento]', e);
+});
+
+/* Desligar com Ctrl+C ou pelo "Encerrar" do Windows precisa fechar o banco:
+ * sem isso o WAL fica pela metade e o proximo boot pode ter que recuperar —
+ * o que funciona, mas em outro processo que nao pode falhar. */
+let encerrando = false;
+function encerrar(sinal) {
+  if (encerrando) return;
+  encerrando = true;
+  console.log('\n' + sinal + ' recebido. Fechando o banco...');
+  try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
+  try { fazerBackupAgora(db); } catch (e) { console.error('[backup] falhou no desligamento:', e.message); }
+  servidor.close(() => {
+    try { db.close(); } catch {}
+    process.exit(0);
+  });
+  /* Nao espera conexao pendurada para sempre: um caixa ainda com a tela
+   * aberta perde a venda, mas o banco ja foi fechado acima. */
+  setTimeout(() => {
+    try { db.close(); } catch {}
+    process.exit(0);
+  }, 3000).unref();
+}
+process.on('SIGINT', () => encerrar('SIGINT'));
+process.on('SIGTERM', () => encerrar('SIGTERM'));

@@ -23,13 +23,30 @@ function carimbo() {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
-function fazer() {
+/* O nome real gravado em `fazer()` e `sudam.<carimbo>` (e `sudam-wal.<carimbo>`
+ * para o WAL). A limpeza procurava `sudam.db.`, que nunca existiu — nenhuma
+ * copia era apagada e a pasta crescia 2 arquivos por hora, ~17 mil por ano. No
+ * mini PC da loja, que costuma ser um SSD de 120 GB com o sistema em cima, o
+ * disco enche e o PDV para. A lista precisa casar com o que `fazer()` grava. */
+const PREFIXO_DB = 'sudam.';
+
+function fazer(db) {
   mkdirSync(PASTA, { recursive: true });
-  /* O .db e copiado junto do -wal; sem o checkpoint o .db sozinho pode estar
-     atrasado em relacao ao que esta em memoria. O -shm NAO e copiado: ele e
-     um indice de memoria compartilhada, recriado pelo proprio SQLite quando
-     o banco abre, e guardar uma copia parada so ocupa espaco e confunde quem
-     for restaurar. */
+  /* O checkpoint vem ANTES da copia, em todos os caminhos (primeira carga,
+     hora, desligamento). Sem ele o .db pode estar atrasado em relacao ao que
+     ainda esta no WAL, e quem restaura sem o -wal perde as ultimas vendas.
+     Com o checkpoint, o .db sozinho ja e um banco fechado e consistente. */
+  if (db) {
+    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
+  }
+  /* O .db e copiado junto do -wal; ainda assim o WAL vai junto porque a copia
+     leva alguns milissegundos e uma venda pode entrar nesse meio-tempo. A ordem
+     importa e e a segura: primeiro o .db, depois o -wal. Assim o WAL copiado e
+     sempre mais novo ou igual ao .db, e o SQLite replaya os frames ate o ultimo
+     commit completo. Copiar na ordem contraria produziria um par inconsistente.
+     O -shm NAO e copiado: ele e um indice de memoria compartilhada, recriado
+     pelo proprio SQLite quando o banco abre, e guardar uma copia parada so
+     ocupa espaco e confunde quem for restaurar. */
   for (const sufixo of ['', '-wal']) {
     const origem = caminhoBanco() + sufixo;
     if (existsSync(origem)) {
@@ -40,24 +57,25 @@ function fazer() {
 }
 
 function limpar() {
-  const arquivos = readdirSync(PASTA).filter((f) => f.startsWith('sudam.db.')).sort();
+  const todos = readdirSync(PASTA);
   /* Um backup por dia, mantendo DIAS dias. */
   const porDia = new Map();
-  for (const f of arquivos) {
-    const dia = f.split('_')[0];
+  for (const f of todos) {
+    if (!f.startsWith(PREFIXO_DB) || f.startsWith(PREFIXO_DB + '-wal.')) continue;
+    const dia = f.slice(PREFIXO_DB.length).split('_')[0];
     porDia.set(dia, f);
   }
   const dias = [...porDia.keys()].sort();
   const sobra = dias.slice(0, Math.max(0, dias.length - DIAS));
   for (const dia of sobra) {
-    for (const f of arquivos.filter((x) => x.startsWith(dia))) {
+    for (const f of todos.filter((x) => x.startsWith(PREFIXO_DB + dia))) {
       try { unlinkSync(join(PASTA, f)); } catch {}
     }
   }
   /* Arquivos -wal velhos que ficaram sem o .db correspondente. */
-  for (const f of readdirSync(PASTA)) {
-    if (f.startsWith('sudam-wal.') || f.startsWith('sudam.db-wal.')) {
-      const base = f.replace('-wal.', '');
+  for (const f of todos) {
+    if (f.startsWith('sudam-wal.')) {
+      const base = f.replace('-wal.', '.');
       if (!existsSync(join(PASTA, base))) {
         try { unlinkSync(join(PASTA, f)); } catch {}
       }
@@ -66,10 +84,9 @@ function limpar() {
 }
 
 export function iniciarBackup(db) {
-  try { fazer(); } catch (e) { console.error('[backup] falha na copia inicial:', e.message); }
+  try { fazer(db); } catch (e) { console.error('[backup] falha na copia inicial:', e.message); }
   setInterval(() => {
-    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
-    try { fazer(); } catch (e) { console.error('[backup] falha:', e.message); }
+    try { fazer(db); } catch (e) { console.error('[backup] falha:', e.message); }
   }, 60 * 60 * 1000).unref?.();
   console.log('  backup automatico a cada hora em: ' + PASTA);
 }

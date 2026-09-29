@@ -70,7 +70,7 @@
     var stockTxt = out ? 'Esgotado' : (p.unit === 'kg' ? p.stock + ' kg' : p.stock + ' un');
     return '<button class="v-prod" data-add="' + esc(p.id) + '"' + (out ? ' disabled' : '') + ' title="' + esc(p.name) + '">' +
       '<span class="v-prod-info">' +
-        '<span class="v-prod-name"><span class="v-prod-emoji">' + p.emoji + '</span>' + esc(p.name) + '</span>' +
+          '<span class="v-prod-name"><span class="v-prod-emoji">' + esc(p.emoji) + '</span>' + esc(p.name) + '</span>' +
         '<span class="v-prod-meta v-mono">' + esc(p.code || p.barcode || '') + '<em>·</em>' + esc(Store.categoryOf(p.category).name) + '</span>' +
       '</span>' +
       '<span class="v-prod-right">' +
@@ -120,7 +120,7 @@
       '<button class="v-cat' + (activeCategory === 'all' ? ' active' : '') + '" data-cat="all">Todos <b>' + nActive + '</b></button>' +
       db.categories.filter(function (c) { return counts[c.id]; }).map(function (c) {
         return '<button class="v-cat' + (activeCategory === c.id ? ' active' : '') + '" data-cat="' + esc(c.id) + '">' +
-          c.emoji + ' ' + esc(c.name) + ' <b>' + counts[c.id] + '</b></button>';
+          esc(c.emoji) + ' ' + esc(c.name) + ' <b>' + counts[c.id] + '</b></button>';
       }).join('');
   }
 

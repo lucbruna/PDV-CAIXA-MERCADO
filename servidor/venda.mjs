@@ -13,6 +13,17 @@ function arred2(n) {
   return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 }
 
+/* Erro de entrada do cliente (400) — nao e falha do servidor, entao o cliente
+ * precisa saber que a venda foi recusada, e nao que deu problema. */
+function entrada(mensagem, codigo) {
+  return Object.assign(new Error(mensagem), { status: 400, codigo });
+}
+
+/* Folga de 1 centavo. Centavo unico e sempre sujeito a ponto flutuante
+ * (10.10 / 3 = 3.3666...), e reprovar uma venda por causa de 0,005 e pior
+ * que o erro que ela evita: o cliente esta no balcao com a mercadoria. */
+const FOLGA = 0.01;
+
 /* Id sequencial de lancamento. Fica em uma funcao propria porque e usado em
  * dois ramos do laco e a versao anterior repetia a mesma subquery giantemente
  * dentro de dois prepare(). */
@@ -46,9 +57,19 @@ export function registrarVenda(db, venda, opcoes = {}) {
           { status: 409, codigo: 'produto_inexistente' }
         );
       }
-      const qty = Number(item.qty) || 0;
-      const preco = Number(p.price) || 0;
-      const linha = { ...item, price: preco, qty, subtotal: arred2(preco * qty) };
+      /* Quantidade precisa ser positiva e finita. Sem esta regra um corpo com
+       * `qty: -50` passa, o estoque AUMENTA 50 unidades numa "venda" e o
+       * caixa pode inflar o estoque sem limite simplesmente repetindo a
+       * chamada — o preco do servidor estava certo e nao segurava isso. */
+      const qty = Number(item.qty);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        throw entrada(`Quantidade invalida (${item.qty}) em "${p.name || item.id}".`, 'qty_invalida');
+      }
+      const preco = Number(p.price);
+      if (!Number.isFinite(preco) || preco < 0) {
+        throw entrada(`Preco invalido no cadastro de "${p.name || item.id}".`, 'preco_invalido');
+      }
+      const linha = { ...item, price: arred2(preco), qty, subtotal: arred2(preco * qty) };
       itensCorrigidos.push(linha);
       subtotalServidor = arred2(subtotalServidor + linha.subtotal);
 
@@ -64,7 +85,11 @@ export function registrarVenda(db, venda, opcoes = {}) {
            comparava contra false sem nunca ver o campo. */
         p.divergencia = false;
       }
-      gravar(db, 'produtos', p);
+      /* `interno: true`: e a venda que produz o estoque negativo quando o
+       * caixa vendeu mais do que tinha (divergencia, conferida depois). A
+       * validacao de cadastro em banco.mjs rejeitaria estoque negativo — e
+       * aqui ele e o resultado legitimo da regra da casa, nao um erro. */
+      gravar(db, 'produtos', p, { interno: true });
     }
 
     /* Desconto concede desconto: o total do servidor e o subtotal menos o que
@@ -78,13 +103,89 @@ export function registrarVenda(db, venda, opcoes = {}) {
       tetoDesconto
     );
     const total = arred2(subtotalServidor - desconto);
-    const vendaCorrigida = {
-      ...venda,
-      items: itensCorrigidos,
-      subtotal: subtotalServidor,
-      discount: desconto,
-      total,
-    };
+
+    /* ---- pagamento conferido contra o total do servidor ----
+     *
+     * O preco unitario ja vinha do servidor, mas os VALORES das formas de
+     * pagamento ainda vinham do cliente — e sao eles que viram dinheiro: o
+     * troco, o dinheiro esperado no gaveteiro, a entrada no financeiro e a
+     * divida do cliente. Uma venda de R$ 100 com `payments: [{Dinheiro,
+     * 0.01}]` era aceita: o total ficava 100, mas o caixa recebia 0,01 e o
+     * gerencia via R$ 100 a menos no gaveteiro, sem nenhum rastro do motivo.
+     * Aqui o servidor passa a conferir.
+     *
+     * A regra que sobra para o cliente e legitima: dividir o total em varias
+     * formas (dinheiro + Pix, parcelado no cartao) e pagar em dinheiro a mais
+     * para receber troco. Todo o resto e derivado aqui.
+     */
+    const pagamentosBrutos = Array.isArray(venda.payments) ? venda.payments : [];
+    const pagamentos = [];
+    let pagoTotal = 0;
+    let pagoDinheiro = 0;
+    for (const p of pagamentosBrutos) {
+      if (!p || typeof p !== 'object') continue;
+      const metodo = String(p.method || '').trim();
+      if (!metodo) continue;
+      const valor = arred2(p.amount);
+      if (!Number.isFinite(valor) || valor < 0) {
+        throw entrada(`Valor invalido na forma de pagamento "${metodo}".`, 'pagamento_invalido');
+      }
+      /* Só o dinheiro pode passar do total, porque é o único que gera troco.
+       * Sem isso, `Crediário: 999999` numa venda de R$ 10 inflava a dívida
+       * do cliente para R$ 999.999 — o limite de crédito virava ficção. */
+      if (metodo !== 'Dinheiro' && valor > total + FOLGA) {
+        throw entrada(
+          `"${metodo}" (R$ ${valor.toFixed(2)}) maior que o total da venda (R$ ${total.toFixed(2)}).`,
+          'pagamento_acima_do_total'
+        );
+      }
+      pagamentos.push({ ...p, method: metodo, amount: valor });
+      pagoTotal = arred2(pagoTotal + valor);
+      if (metodo === 'Dinheiro') pagoDinheiro = arred2(pagoDinheiro + valor);
+    }
+    if (!pagamentos.length) {
+      throw entrada('Informe a forma de pagamento da venda.', 'pagamento_ausente');
+    }
+    if (pagoTotal + FOLGA < total) {
+      throw entrada(
+        `Pagamento insuficiente: faltam R$ ${arred2(total - pagoTotal).toFixed(2)}.`,
+        'pagamento_insuficiente'
+      );
+    }
+
+    /* Troco é do servidor. Aceitar o `change` do cliente permitia declarar
+     * troco de R$ 450 sobre R$ 500 recebidos numa venda de R$ 10 e baixar o
+     * dinheiro esperado do gaveteiro em R$ 440 sem nenhum dinheiro real. */
+    const troco = arred2(Math.max(0, pagoDinheiro - total));
+
+    /* Data e do servidor. Aceitar `date` do cliente permitia lancar uma venda
+     * de hoje com data de 400 dias atrás (ou de amanhã), mexendo em todo
+     * relatório e no fechamento de caixa sem que nada pedisse senha. */
+    const agoraServidor = new Date().toISOString();
+
+  const vendaCorrigida = {
+    ...venda,
+    items: itensCorrigidos,
+    payments: pagamentos,
+    subtotal: subtotalServidor,
+    discount: desconto,
+    total,
+    change: troco,
+    date: agoraServidor,
+    /* QUEM vendeu vem da sessao, nunca do corpo da requisicao. O `...venda`
+     * acima traz tudo que o cliente mandou, inclusive `operatorId` -- e esse
+     * campo e o que decide quem pode estornar a venda. Se aceite, um caixa
+     * carimba `operatorId` do gerente e a venda passa a ser "dele": a
+     * rastreabilidade de quem mexeu no dinheiro vira ficção, e o estorno sai
+     * pela regra errada. O servidor tem a sessao na mao; o cliente nao tem
+     * nada a dizer aqui. */
+    ...(opcoes.operador
+      ? {
+          operatorId: opcoes.operador.id,
+          operatorName: opcoes.operador.name,
+        }
+      : {}),
+  };
 
     /* ---- cliente: divida e pontos somam sobre o valor do servidor ---- */
     if (vendaCorrigida.customerId) {
@@ -123,7 +224,6 @@ export function registrarVenda(db, venda, opcoes = {}) {
     gravar(db, 'vendas', gravada);
 
     /* ---- lancamentos financeiros ---- */
-    const troco = Number(vendaCorrigida.change) || 0;
     for (const p of vendaCorrigida.payments || []) {
       const base = {
         id: proximoLancamentoId(db),
@@ -152,7 +252,14 @@ export function registrarVenda(db, venda, opcoes = {}) {
             description: `Venda #${vendaCorrigida.id}`,
             amount: recebido,
             method: p.method,
-            settled: p.method === 'Dinheiro',
+            /* Nada foi baixado ainda: uma venda recem-registrada nao esta
+             * "liquidada". Marcar a entrada de dinheiro como settled na criacao
+             * fazia o estorno pular exatamente essa linha (`if (lan.settled)
+             * continue`) — o venda voltava o estoque e tirava o dinheiro
+             * esperado do gaveteiro, mas a entrada de R$ X continuava no
+             * financeiro. O caixa fechava com R$ X a menos do que o relatorio
+             * dizia. `settled` e para o que ja foi conferido no fechamento. */
+            settled: false,
           });
         }
       }
@@ -195,7 +302,7 @@ export function proximoSeq(db) {
  * Idempotente por vendaId: estornar duas vezes nao devolve o estoque duas
  * vezes (o `status` da venda gravada e a trava).
  */
-export function estornarVenda(db, vendaId, motivo) {
+export function estornarVenda(db, vendaId, motivo, opcoes = {}) {
   db.exec('BEGIN IMMEDIATE');
   try {
     const l = db.prepare('SELECT json FROM vendas WHERE id = ?').get(String(vendaId));
@@ -215,7 +322,7 @@ export function estornarVenda(db, vendaId, motivo) {
       if (!p) continue; // produto deletado no caminho: nada a devolver
       p.stock = arred2((Number(p.stock) || 0) + (Number(item.qty) || 0));
       p.divergencia = p.stock < -1e-9;
-      gravar(db, 'produtos', p);
+      gravar(db, 'produtos', p, { interno: true });
     }
 
     /* ---- baixa a divida do cliente ---- */
@@ -254,10 +361,15 @@ export function estornarVenda(db, vendaId, motivo) {
     }
 
     /* ---- marca a venda ---- */
+    /* Quem estornou fica gravado na venda. Antes so o motivo (texto livre) e o
+     * horario diziam o que aconteceu; num extravio de dinheiro no fim do dia,
+     * "nao sei, foi o Pedro" e tudo que o registro tinha a oferecer. */
+    const autor = opcoes.por && opcoes.por.username ? opcoes.por.username : 'desconhecido';
     const estornada = {
       ...venda,
       status: 'Estornada',
       refundReason: motivo || 'sem motivo informado',
+      refundBy: autor,
       voidedAt: new Date().toISOString(),
     };
     gravar(db, 'vendas', estornada);

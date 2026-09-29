@@ -215,6 +215,19 @@
     });
   }
 
+  /* Estorno vai ao servidor antes de confidentemente. O servidor devolve o
+     estoque, baixa a divida e tira do turno; se ele nao souber do estorno, os
+     outros 4 caixas continuam vendo a mercadoria como disponivel. */
+  function estornar(vendaId, motivo) {
+    return req('POST', '/api/venda/estornar', { id: vendaId, motivo: motivo }, undefined, 10000)
+      .then(function (r) {
+        if (r.status === 200) { estado.online = true; return { ok: true, venda: r.dados.venda }; }
+        if (r.status === 0) { enfileirar('estorno', { id: vendaId, motivo: motivo }); return { ok: false, enfileirada: true }; }
+        if (r.status === 401) { guardarToken(null); estado.autenticado = false; return { ok: false, erro: r.dados.erro, semSessao: true }; }
+        return { ok: false, erro: r.dados.erro };
+      });
+  }
+
   function salvar(colecao, lista) {
     return req('POST', '/api/' + colecao, { lista: lista }).then(function (r) {
       if (r.status === 0) { enfileirar(colecao, lista); return { ok: false, enfileirada: true }; }
@@ -261,6 +274,8 @@
       if (!item) return Promise.resolve({ ok: true, enviados: 0, restam: 0 });
       var p = item.tipo === 'venda'
         ? venda(item.dados)
+        : item.tipo === 'estorno'
+        ? estornar(item.dados.id, item.dados.motivo)
         : salvar(item.tipo, [].concat(item.dados));
       if (p && p.ok) return passo().then(function (r) {
         r.enviados = (r.enviados || 0) + 1;
@@ -290,6 +305,7 @@
     base: base_,
     vendas: vendas,
     venda: venda,
+    estornar: estornar,
     salvar: salvar,
     migrar: migrar,
     migrado: migrado,

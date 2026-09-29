@@ -211,11 +211,41 @@ try {
   check('admin: desconto limitado ao subtotal', dsc.dados?.venda?.total === 0, 'total=' + dsc.dados?.venda?.total);
   check('admin: desconto nao passou do subtotal', dsc.dados?.venda?.discount === 3, 'desconto=' + dsc.dados?.venda?.discount);
 
-  console.log('\n15. Logout (por ultimo: mata o token)');
+  console.log('\n15. Estorno no servidor');
+  /* Precisa rodar com a sessao viva: o logout e o rate limit vem DEPOIS. */
+  const antesEst = (await req('GET', '/api/produtos?busca=Biscoito', undefined, token)).dados?.produtos?.[0]?.stock;
+  const vE = await req('POST', '/api/venda', {
+    id: 'est1', date: '2026-09-29T14:00:00.000Z',
+    items: [{ id: 'p9', name: 'Biscoito', qty: 4, price: 3 }],
+    total: 12, change: 0, payments: [{ method: 'Dinheiro', amount: 12 }],
+    customerId: 'c1',
+  }, token);
+  check('venda para estornar registrada', vE.status === 200);
+  const meio = (await req('GET', '/api/produtos?busca=Biscoito', undefined, token)).dados?.produtos?.[0]?.stock;
+  check('estoque baixou 4', meio === antesEst - 4, 'antes=' + antesEst + ' meio=' + meio);
+
+  const semMotivo = await req('POST', '/api/venda/estornar', { id: 'est1' }, token);
+  check('estorno sem motivo -> 400', semMotivo.status === 400, JSON.stringify(semMotivo.dados));
+
+  const est = await req('POST', '/api/venda/estornar', { id: 'est1', motivo: 'produto devolvido' }, token);
+  check('estorno aceito', est.status === 200, JSON.stringify(est.dados));
+  check('venda marcada como Estornada', est.dados?.venda?.status === 'Estornada');
+  const depois = (await req('GET', '/api/produtos?busca=Biscoito', undefined, token)).dados?.produtos?.[0]?.stock;
+  check('estoque voltou ao original', depois === antesEst, 'antes=' + antesEst + ' depois=' + depois);
+
+  const est2 = await req('POST', '/api/venda/estornar', { id: 'est1', motivo: 'de novo' }, token);
+  check('estorno repetido e idempotente', est2.dados?.repetida === true);
+  const depois2 = (await req('GET', '/api/produtos?busca=Biscoito', undefined, token)).dados?.produtos?.[0]?.stock;
+  check('estoque NAO voltou duas vezes', depois2 === antesEst, 'depois=' + depois2);
+
+  const estInsum = await req('POST', '/api/venda/estornar', { id: 'inexistente99', motivo: 'x' }, token);
+  check('estorno de venda inexistente -> 404', estInsum.status === 404, JSON.stringify(estInsum.dados));
+
+  console.log('\n16. Logout (por ultimo: mata o token)');
   check('logout 200', (await req('POST', '/api/logout', {}, token)).status === 200);
   check('token morto apos logout', (await req('GET', '/api/base', undefined, token)).status === 401);
 
-  console.log('\n16. Rate limit no login');
+  console.log('\n17. Rate limit no login');
   /* A mesma conta, muitas vezes: e o ataque que importa (descobrir a senha
      de admin). A chave e IP+usuario de proposito -- os 5 caixas da loja
      saem do mesmo IP, e um limite so por IP trancaria o caixa legitimo. */

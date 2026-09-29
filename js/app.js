@@ -749,6 +749,9 @@
         if (target) Object.assign(target, rec);
         else db.products.push(rec);
         Store.save();
+        // O preco e o estoque sao decididos no servidor: se o cadastro nao
+        // subir, os outros 4 caixas vendem pelo preco velho.
+        Store.marcarCadastro('products', target || rec);
         rerender();
         UI.toast('Produto "' + rec.name + '" salvo.', 'ok');
       }
@@ -978,7 +981,9 @@
         db.suppliers = db.suppliers || [];
         if (s) Object.assign(s, d);
         else db.suppliers.push(Object.assign({ id: Store.uid('sup') }, d));
-        Store.save(); rerender();
+        Store.save();
+        Store.marcarCadastro('suppliers', s || db.suppliers[db.suppliers.length - 1]);
+        rerender();
         UI.toast('Fornecedor salvo.', 'ok');
       }
     });
@@ -1056,7 +1061,12 @@
         if (d.cpf && !/^\d{11}$/.test(String(d.cpf).replace(/\D/g, ''))) { UI.toast('CPF deve ter 11 dígitos.', 'err'); return false; }
         if (c) { Object.assign(c, d); c.debtLimit = UI.round2(UI.parseNum(d.debtLimit)); }
         else db.customers.push(Object.assign({ id: Store.uid('c'), debt: 0, points: 0, createdAt: new Date().toISOString() }, d, { debtLimit: UI.round2(UI.parseNum(d.debtLimit)) }));
-        Store.save(); rerender();
+        Store.save();
+        // Cliente cadastrado no caixa 1 precisa existir no caixa 2: sem isso
+        // a venda a prazo la cria um cliente fantasma, e a divida fica
+        // dividida entre dois registros com o mesmo nome.
+        Store.marcarCadastro('customers', c || db.customers[db.customers.length - 1]);
+        rerender();
         UI.toast('Cliente salvo.', 'ok');
       }
     });

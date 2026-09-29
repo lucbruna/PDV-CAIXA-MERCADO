@@ -623,6 +623,24 @@
       });
     }).then(function (ok) {
       if (!ok) return;
+      /* O servidor e quem tem a verdade do estoque. Um estorno que o servidor
+         recusou NAO pode ser dado por bom só no caixa que fez a venda: os
+         outros 4 continuariam vendo a mercadoria e poderiam vendê-la de novo.
+         Por isso a chamada vem ANTES de tocar no local. */
+      if (Store.temServidor && Store.temServidor()) {
+        return API.estornar(id, reason).then(function (r) {
+          if (r && r.ok) return true;
+          if (r && r.enfileirada) {
+            UI.toast('Servidor fora do ar — estorno guardado e será enviado depois.', 'warn', 6000);
+            return true;
+          }
+          UI.toast('Estorno recusado pelo servidor: ' + ((r && r.erro) || 'erro') + ' Nada foi alterado.', 'err', 7000);
+          return false;
+        });
+      }
+      return true;
+    }).then(function (podeSeguir) {
+      if (podeSeguir === false) return;
       var customer = db.customers.find(function (c) { return c.id === s.customerId; });
       var credit = s.payments.filter(function (p) { return p.method === 'Crediário'; })
         .reduce(function (a, p) { return a + p.amount; }, 0);

@@ -183,3 +183,96 @@ export function proximoSeq(db) {
   const r = db.prepare('SELECT COALESCE(MAX(seq), 1000) + 1 AS seq FROM vendas').get();
   return r.seq;
 }
+
+/* ---------------- estorno ----------------
+ *
+ * O estorno e o inverso exato de registrarVenda, e precisa rodar na MESMA
+ * transacao. Sem ele aqui, o estorno feito no PDV devolvia o estoque apenas
+ * no caixa que fez a venda: os outros 4 continuavam vendo a mercadoria como
+ * disponivel e podiam vender o que ja estava devolvido. Pior, a proxima
+ * puxada sobrescrevia o estorno local e ele sumia do historico.
+ *
+ * Idempotente por vendaId: estornar duas vezes nao devolve o estoque duas
+ * vezes (o `status` da venda gravada e a trava).
+ */
+export function estornarVenda(db, vendaId, motivo) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const l = db.prepare('SELECT json FROM vendas WHERE id = ?').get(String(vendaId));
+    if (!l) {
+      throw Object.assign(new Error('Venda nao encontrada no servidor.'), { status: 404 });
+    }
+    const venda = JSON.parse(l.json);
+
+    if (venda.status === 'Estornada') {
+      db.exec('COMMIT');
+      return { venda, repetida: true };
+    }
+
+    /* ---- devolve o estoque ---- */
+    for (const item of venda.items || []) {
+      const p = obter(db, 'produtos', item.id);
+      if (!p) continue; // produto deletado no caminho: nada a devolver
+      p.stock = arred2((Number(p.stock) || 0) + (Number(item.qty) || 0));
+      p.divergencia = p.stock < -1e-9;
+      gravar(db, 'produtos', p);
+    }
+
+    /* ---- baixa a divida do cliente ---- */
+    const credito = (venda.payments || [])
+      .filter((p) => p.method === 'Crediário')
+      .reduce((a, p) => a + (Number(p.amount) || 0), 0);
+    if (venda.customerId && credito > 0) {
+      const c = obter(db, 'clientes', venda.customerId);
+      if (c) {
+        c.debt = arred2(Math.max(0, (Number(c.debt) || 0) - credito));
+        gravar(db, 'clientes', c);
+      }
+    }
+
+    /* ---- estorna os lancamentos da venda ---- */
+    const lancamentos = bancoObterPorFonte(db, vendaId);
+    for (const lan of lancamentos) {
+      if (lan.settled) continue; // ja foi baixa no caixa: mexer aqui desalinharia
+      db.prepare('DELETE FROM lancamentos WHERE id = ?').run(lan.id);
+    }
+
+    /* ---- tira do turno e do dinheiro esperado ---- */
+    let devolvido = 0;
+    for (const p of venda.payments || []) {
+      if (p.method === 'Dinheiro') {
+        devolvido = arred2(devolvido + (Number(p.amount) || 0) - (Number(venda.change) || 0));
+      }
+    }
+    if (venda.shiftId) {
+      const t = obter(db, 'turnos', venda.shiftId);
+      if (t) {
+        t.cashExpected = arred2((Number(t.cashExpected) || 0) - devolvido);
+        t.sales = (t.sales || []).filter((x) => x !== vendaId);
+        gravar(db, 'turnos', t);
+      }
+    }
+
+    /* ---- marca a venda ---- */
+    const estornada = {
+      ...venda,
+      status: 'Estornada',
+      refundReason: motivo || 'sem motivo informado',
+      voidedAt: new Date().toISOString(),
+    };
+    gravar(db, 'vendas', estornada);
+
+    db.exec('COMMIT');
+    return { venda: estornada, repetida: false, devolvido };
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw e;
+  }
+}
+
+function bancoObterPorFonte(db, fonte) {
+  return db
+    .prepare('SELECT json FROM lancamentos WHERE source = ?')
+    .all(String(fonte))
+    .map((r) => JSON.parse(r.json));
+}

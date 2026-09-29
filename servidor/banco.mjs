@@ -176,6 +176,10 @@ export function abrir() {
 /* ---------- acesso generico por colecao ---------- */
 
 const MAPA = {
+  /* `products` faltava aqui: o laco de rotas genericas em servidor.mjs
+     consulta tabelaDe('products') e recebia null, entao /api/products nunca
+     era registrada. Isso derrubava o cadastro de produto no servidor. */
+  products: 'produtos',
   produtos: 'produtos',
   customers: 'clientes',
   clientes: 'clientes',

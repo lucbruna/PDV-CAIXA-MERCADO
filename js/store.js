@@ -592,6 +592,34 @@
     return typeof API !== 'undefined' && !!API.status;
   }
 
+  /* Cadastro alterado num caixa precisa chegar aos outros quatro. Sem isto,
+     o cliente cadastrado no caixa 1 nao existe no caixa 2, e a venda a prazo
+     no caixa 2 cria um registro de cliente fantasma.
+     O envio e agrupado com atraso curto: cadastrar cliente com CPF, nome,
+     telefone e endereço dispara varias gravacoes seguidas, e ir ao servidor
+     a cada tecla cansaria o mini PC sem ganho. */
+  var filaCadastro = {};
+  var timerCadastro = null;
+
+  function marcarCadastro(colecao, obj) {
+    if (!temServidor() || !obj || !obj.id) return;
+    filaCadastro[colecao] = filaCadastro[colecao] || {};
+    filaCadastro[colecao][obj.id] = obj;
+    if (timerCadastro) return;
+    timerCadastro = setTimeout(flushCadastro, 1200);
+  }
+
+  function flushCadastro() {
+    timerCadastro = null;
+    var lote = filaCadastro;
+    filaCadastro = {};
+    var envios = Object.keys(lote).map(function (colecao) {
+      return API.salvar(colecao, Object.keys(lote[colecao]).map(function (id) { return lote[colecao][id]; }))
+        .catch(function () { return { ok: false }; });
+    });
+    if (envios.length) Promise.all(envios);
+  }
+
   /* Baixa produtos/clientes/config do servidor e substitui o local. Chamado
      depois do login, para que os 5 caixas partam da mesma verdade. */
   function puxarDoServidor() {
@@ -622,6 +650,16 @@
     return API.salvar(colecao, lista).catch(function () { return { ok: false, motivo: 'erro' }; });
   }
 
+  /* Cadastro edited num caixa precisa chegar aos outros quatro. Sem isto,
+     o cliente cadastrado no caixa 1 nao existe no caixa 2, e a venda a
+     prazo no caixa 2 cria um registro de cliente fantasma. Chame depois de
+     gravar qualquer produto, cliente, fornecedor ou lancamento — o servidor
+     faz upsert pelo id, entao reenviar o mesmo objeto nao duplica. */
+  function enviarCadastro(colecao, obj) {
+    if (!temServidor() || !obj || !obj.id) return Promise.resolve({ ok: false });
+    return sincronizar(colecao, [obj]);
+  }
+
   function migrarParaServidor() {
     if (!temServidor()) return Promise.resolve({ ok: false, erro: 'Servidor indisponível.' });
     return API.migrar(db);
@@ -647,6 +685,8 @@
     puxarDoServidor: puxarDoServidor,
     enviarVenda: enviarVenda,
     sincronizar: sincronizar,
+    marcarCadastro: marcarCadastro,
+    enviarCadastro: enviarCadastro,
     migrarParaServidor: migrarParaServidor,
     can: can,
     openShift: openShift,

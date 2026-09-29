@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
 import * as banco from './banco.mjs';
 import { gerarHash, conferir, hashAntigo, criarSessao, usuarioDaSessao, encerrarSessao, iniciarSessoes } from './auth.mjs';
-import { registrarVenda, proximoSeq } from './venda.mjs';
+import { registrarVenda, estornarVenda, proximoSeq } from './venda.mjs';
 import { iniciarBackup } from './backup.mjs';
 
 const aqui = dirname(fileURLToPath(import.meta.url));
@@ -274,6 +274,18 @@ rota('POST', '/api/venda', async (req, res) => {
   json(res, r);
 });
 
+/* Estorno: devolve estoque, baixa a divida, tira do turno. Idempotente —
+   chamar duas vezes devolve o estoque uma vez so. */
+rota('POST', '/api/venda/estornar', async (req, res) => {
+  const { id, motivo } = await corpo(req);
+  if (!id) throw Object.assign(new Error('Informe o id da venda.'), { status: 400 });
+  if (!motivo || !String(motivo).trim()) {
+    throw Object.assign(new Error('O motivo do estorno e obrigatorio.'), { status: 400 });
+  }
+  const r = estornarVenda(db, id, String(motivo).trim());
+  json(res, r);
+});
+
 /* Estas duas rotas usavam req.lista em vez do corpo ja lido: req e o objeto
    cru do Node, entao `Array.isArray(req.lista)` era sempre false e caia em
    [undefined], quebrando no gravar(). Toda rota de escrita passa por
@@ -389,7 +401,17 @@ rota('POST', '/api/migrar', async (req, res) => {
  * servidor. Uma unica rota por colecao cobre a lista inteira e a escrita
  * usa o mesmo upsert do banco.
  */
-const COLECOES = ['products', 'customers', 'suppliers', 'entries', 'purchases', 'payables', 'quotes', 'heldSales'];
+/* `quotes` saiu da lista: nao ha tabela `quotes` no schema nem uso no app
+   (nenhuma referencia a db.quotes em js/). Deixar o nome aqui era inerte —
+   tabelaDe devolvia null e o laco pulava. */
+const COLECOES = ['products', 'customers', 'suppliers', 'entries', 'purchases', 'payables', 'heldSales'];
+
+/* Alias em portugues. O app fala `produtos` e `clientes` (e sao as duas
+   colecoes mais usadas), enquanto o resto do vocabulario interno e anglais.
+ * Sem estes alias, o POST /api/products respondia "Rota inexistente" e o
+   cadastro de produto nunca chegava ao servidor — que era exatamente o
+ * caminho que o `marcarCadastro` usa. */
+const ALIAS = { produtos: 'products', clientes: 'customers', fornecedores: 'suppliers' };
 
 for (const nome of COLECOES) {
   const tabela = banco.tabelaDe(nome);
@@ -406,6 +428,15 @@ for (const nome of COLECOES) {
     const n = banco.gravarVarios(db, tabela, validos);
     json(res, { gravados: n });
   });
+
+  /* Alias so no POST. O GET dedicado de /api/produtos (que aceita ?busca=)
+     foi declarado antes deste laco e e mais rico que a listagem generica;
+     sobrescreve-lo aqui perderia a busca. O POST nao tinha equivalente
+     dedicado util, e o handler generico faz o mesmo upsert. */
+  const pt = Object.keys(ALIAS).find((k) => ALIAS[k] === nome);
+  if (pt && pt !== nome) {
+    rotas.set(`POST /api/${pt}`, rotas.get(`POST /api/${nome}`));
+  }
 }
 
 /* Turnos e usuarios ficam de fora de proposito: os dois tem regra propria

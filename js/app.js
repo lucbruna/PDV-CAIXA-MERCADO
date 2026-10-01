@@ -377,7 +377,9 @@
      quebrar as outras. Toda view nova usa as versões *El. */
   function kpiEl(label, value, foot, tone, spark) {
     return el('div', { class: 'card kpi ' + (tone || '') }, [
-      el('div', { class: 'kpi-label' }, el('i')),
+      /* O rotulo tem de entrar aqui: sem ele, o cartao mostrava so o numero
+         (o CSS .kpi-label espera texto + o ponto). */
+      el('div', { class: 'kpi-label' }, [el('i'), label]),
       el('div', { class: 'kpi-value num' }, value),
       foot ? el('div', { class: 'kpi-foot' }, foot) : null,
       spark ? UI.sparklineEl(spark) : null
@@ -849,6 +851,24 @@
       ]);
     });
 
+    /* Correcao em massa: so preenche campo VAZIO e so com padroes seguros
+       (CFOP 5102 e o CSOSN 102 do Simples). NCM e CST PIS/COFINS dependem do
+       produto e do contador -- nao sao adivinhados. */
+    function aplicarPadroes() {
+      var mudados = [], cfop = 0, csosn = 0;
+      ativos.forEach(function (p) {
+        var mudou = false;
+        if (!String(p.cfop || '').trim()) { p.cfop = '5102'; cfop++; mudou = true; }
+        if (!normal && !String(p.csosn || '').trim()) { p.csosn = '102'; csosn++; mudou = true; }
+        if (mudou) mudados.push(p);
+      });
+      if (!mudados.length) { UI.toast('Nada a preencher.', 'info'); return 0; }
+      Store.save();
+      if (Store.marcarCadastro) mudados.forEach(function (p) { Store.marcarCadastro('products', p); });
+      UI.toast('Padrões preenchidos: ' + cfop + ' CFOP, ' + csosn + ' CSOSN.', 'ok');
+      return mudados.length;
+    }
+
     UI.modal({
       title: 'Prontidão fiscal (NFC-e)', icon: 'file', size: 'lg', footer: false,
       body: frag(
@@ -859,15 +879,22 @@
         ]),
         el('div', { class: 'modal-note' }, 'Este painel confere só o cadastro. Emitir NFC-e exige também certificado ICP-Brasil (e-CNPJ A1), geração e assinatura do XML e comunicação com a SEFAZ.'),
         pendentes.length
-          ? el('div', { class: 'list-plain' }, linhas)
+          ? frag(
+              el('div', { class: 'list-plain' }, linhas),
+              el('button', { class: 'btn block mt-2', 'data-defaults': '' },
+                [iconEl('check', 14), ' Preencher padrões seguros (CFOP 5102' + (normal ? '' : ' + CSOSN 102') + ')'])
+            )
           : emptyEl('Nada pendente', 'Todos os produtos ativos têm os campos fiscais mínimos.', 'file')
       ),
       onMount: function (root, close) {
         root.addEventListener('click', function (e) {
           var b = e.target.closest('[data-fix]');
-          if (!b) return;
-          close();
-          editProduct(b.dataset.fix);
+          if (b) { close(); editProduct(b.dataset.fix); return; }
+          if (e.target.closest('[data-defaults]')) {
+            aplicarPadroes();
+            close();
+            rerender();
+          }
         });
       }
     });
@@ -1928,12 +1955,19 @@
   }
 
   /* ---------- CONFIGURAÇÕES ---------- */
+  /* Versao do sistema, reportada pelo servidor em /api/status. A fonte unica
+     e o arquivo VERSION do projeto (ver README, secao Versionamento). */
+  function versaoApp() {
+    return (typeof API !== 'undefined' && API.estado && API.estado.versao) || '';
+  }
+
   Views.settings = function () {
     var db = Store.db;
     var u = Store.currentUser();
     var cfg = db.config;
+    var v = versaoApp();
     return frag(
-      pageHead('Configurações', 'Loja, operação, fiscal, tema, usuários e dados.'),
+      pageHead('Configurações', 'Loja, operação, fiscal, tema, usuários e dados.' + (v ? ' · versão ' + v : '')),
       el('div', { class: 'grid two' }, [
         el('div', { class: 'grid', style: { gap: '13px', 'align-content': 'start' } }, [
           cardEl('Identificação da loja', cfgForm('loja'), '', 'store'),

@@ -297,6 +297,26 @@ try {
   const doisPix = await cdp.eval("(document.getElementById('payParts').innerText.match(/Pix/g)||[]).length");
   check('duas partes de Pix lancadas', doisPix === 2, 'pix=' + doisPix);
 
+  console.log('\n7e. Versao na tela e painel de prontidao fiscal');
+  const versaoApi = await cdp.eval("((API.estado||{}).versao)||''");
+  check('servidor reporta a versao', /^\d+\.\d+\.\d+$/.test(versaoApi), 'versao=' + versaoApi);
+  await cdp.eval("location.hash='settings'"); await espera(600);
+  const subSettings = await cdp.eval("(function(){var p=document.querySelector('.page-head p'); return p?p.textContent:'';})()");
+  check('Ajustes mostra a versao', subSettings.indexOf(versaoApi) > -1, subSettings);
+
+  await cdp.eval("location.hash='products'"); await espera(700);
+  await cdp.eval("Array.prototype.find.call(document.querySelectorAll('.page-head button'),function(b){return /Fiscal NFC-e/.test(b.textContent);}).click()");
+  await espera(400);
+  const painelTxt = await cdp.eval("(function(){var m=document.querySelector('.overlay .modal-body'); return m?m.innerText:'';})()");
+  check('painel de prontidao fiscal abre', /pendentes/i.test(painelTxt), painelTxt.replace(/\s+/g, ' ').slice(0, 120));
+  check('rotulo dos KPI aparece (regressao do kpiEl)', /produtos prontos/i.test(painelTxt), painelTxt.replace(/\s+/g, ' ').slice(0, 80));
+  check('produto sem campo fiscal aparece como pendente', /Falta:/.test(painelTxt), painelTxt.replace(/\s+/g, ' ').slice(0, 160));
+  await cdp.eval("var b=document.querySelector('[data-defaults]'); if(b) b.click();");
+  await espera(400);
+  const csosn = await cdp.eval("(Store.db.products.filter(function(p){return p.id==='pxss';})[0]||{}).csosn");
+  const cfop = await cdp.eval("(Store.db.products.filter(function(p){return p.id==='pxss';})[0]||{}).cfop");
+  check('padroes seguros preenchem CFOP e CSOSN', cfop === '5102' && csosn === '102', 'cfop=' + cfop + ' csosn=' + csosn);
+
   console.log('\n8. Nenhuma excecao nao tratada na pagina');
   const excecoes = cdp.eventos.filter((e) => e.method === 'Runtime.exceptionThrown');
   check('sem excecao de runtime', excecoes.length === 0,

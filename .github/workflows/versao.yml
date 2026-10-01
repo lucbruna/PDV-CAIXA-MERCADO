@@ -26,9 +26,10 @@ jobs:
         id: v
         run: echo "valor=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
 
-      - name: Criar a tag se ainda nao existir
+      - name: Criar a tag e o release se ainda nao existirem
         env:
           V: ${{ steps.v.outputs.valor }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if ! echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "VERSION invalido: '$V'"; exit 1
@@ -39,4 +40,5 @@ jobs:
           fi
           git tag "v$V"
           git push origin "v$V"
-          echo "Tag v$V criada."
+          gh release create "v$V" --title "v$V" --generate-notes
+          echo "Tag e release v$V criados."

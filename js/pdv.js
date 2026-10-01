@@ -922,6 +922,7 @@
     if (!s) return;
     var c = db.config;
     var narrow = Number(c.printWidth) <= 58;
+    var versao = (typeof API !== 'undefined' && API.estado && API.estado.versao) || '';
 
     var items = s.items.map(function (i) {
       return '<tr><td>' + esc(i.name) + '<br><span style="color:#555">' + i.qty + ' x ' + UI.num(i.price) + '</span></td>' +
@@ -959,6 +960,7 @@
       '<div class="r b"><span>TOTAL</span><span>' + UI.num(s.total) + '</span></div>' +
       '<div class="sep"></div>' + pays +
       (db.config.taxRegime ? '<div class="sep"></div><div class="c" style="font-size:9px">' + esc(db.config.taxRegime) + ' · Documento auxiliar de venda</div>' : '') +
+      (versao ? '<div class="c" style="font-size:8px">Sudam Gestão PDV v' + esc(versao) + '</div>' : '') +
       '<div class="c" style="margin-top:6px">' + esc(c.receiptFooter) + '</div>';
 
     UI.printHTML(html, Number(c.printWidth) || 80);

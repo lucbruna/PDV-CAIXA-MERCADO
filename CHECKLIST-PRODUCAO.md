@@ -1,13 +1,17 @@
 # Produção — o que falta
 
-Estado em 2026-09-29. O que está pronto foi verificado por
-`servidor/teste/e2e.mjs` (112 asserções),
-`servidor/teste/backup-restaura.mjs` (21),
+Estado em 2026-09-30. O que está pronto foi verificado por
+`servidor/teste/e2e.mjs` (123 asserções),
+`servidor/teste/backup-restaura.mjs` (20),
 `servidor/teste/api-fila.mjs` (27),
 `servidor/teste/frontend-seguro.mjs` (15),
-`servidor/teste/sync-cadastro.mjs` (16) e por instalação real do
+`servidor/teste/sync-cadastro.mjs` (16),
+`servidor/teste/centavos-migracao.mjs` (10),
+`servidor/teste/navegador-seguro.mjs` (38),
+`servidor/teste/estoque-reconcilia.mjs` (16),
+`servidor/teste/pix-fiscal.mjs` (46) e por instalação real do
 `instalar-linux.sh` com service + nginx numa máquina de fábrica.
-São 191 asserções no total, todas passando.
+São **311 asserções** no total, todas passando.
 
 ## Pronto
 
@@ -43,6 +47,27 @@ São 191 asserções no total, todas passando.
   `ERR_UNKNOWN_BUILTIN_MODULE`), e **imprime digital** a porta 8787 em vez de
   confiar nela: se outro programa estiver escutando, o navegador não abre a tela
   errada.
+- **Escrita por coleção respeita o perfil.** O servidor recusa o que a tela já
+  esconde do operador (caixa não grava produto, fornecedor, compra, conta nem
+  lançamento; continua gravando cliente, porque o PDV a prazo precisa). Antes o
+  cliente escondia a página, mas a rota aceitava qualquer sessão.
+- **Backup em arquivo único** (`VACUUM INTO`), sem par `.db`/`-wal` para
+  desencontrar; o teste de restauração confere o arquivo autocontido.
+- **Banco no Windows fora da pasta do programa** (`%ProgramData%`), com cópia
+  automática do banco de instalações antigas.
+- **TLS por PFX** (`SUDAM_PFX`) e ajudantes de Windows: `LIBERAR-FIREWALL.bat`
+  (porta só na rede local) e `GERAR-CERTIFICADO.ps1` (certificado autoassinado).
+- **Testes em porta dedicada.** O `sync-cadastro.mjs` usava a 8787 do PDV;
+  havendo um servidor de verdade no ar, o teste conversava com ele e gravava
+  dado de teste no banco real. Agora usa 8798 e aborta se o próprio servidor de
+  teste não subir.
+- **Dinheiro em centavos inteiros** (`dinheiro.mjs`): o servidor calcula e
+  guarda valores em centavos; as colunas de dinheiro no SQLite são `INTEGER`.
+  O JSON do cliente continua em reais. Migração de bancos antigos no boot e
+  teste dedicado de restauração/ idempotência.
+- **Teste de navegador de verdade** (`navegador-seguro.mjs`): abre o app em
+  Chrome headless, faz login pela tela e confere XSS escapado nas telas reais e
+  o CSP bloqueando `<script>`/handler inline.
 
 ## Bloqueadores de produção
 
@@ -78,9 +103,11 @@ abrir o app quebrado.
 
 ### 2. Definir a senha do administrador
 
-O primeiro acesso é `admin` / `1234`. A migração de hash legado acontece no
-primeiro login, mas a senha em si é a padrão. **Trocar antes de abrir a
-loja** — com o rate limit, 8 tentativas em 5 min, e o `1234` cai em segundos.
+O primeiro acesso ainda pode usar `admin` / `1234` se esses forem os dados
+migrados do navegador. Faça a configuração inicial no próprio servidor; depois
+use **Ajustes → Usuários e acessos → Trocar minha senha** e defina uma senha de
+ao menos 12 caracteres antes de abrir a loja. A troca exige a senha atual e
+encerra as outras sessões dessa conta.
 
 ### 3. Testar com as máquinas de verdade
 
@@ -93,37 +120,40 @@ navegadores de verdade na rede da loja, vendendo ao mesmo tempo, e conferir:
 
 ### 4. Restaurar um backup, de fato — **RESOLVIDO**
 
-Agora é verificado por `servidor/teste/backup-restaura.mjs` (21 asserções):
-popula um banco, grava o backup, copia o par `.db`/`-wal` para uma pasta nova,
-sobe um servidor apontado só para essa cópia e confere que voltaram o admin
-(login funciona), os produtos, o preço, o **estoque já descontado** (50 − 3 =
-47), o cliente, a venda com o total e o config.
+Agora é verificado por `servidor/teste/backup-restaura.mjs` (20 asserções):
+popula um banco, grava o backup, copia o arquivo para uma pasta nova, sobe um
+servidor apontado só para essa cópia e confere que voltaram o admin (login
+funciona), os produtos, o preço, o **estoque já descontado** (50 − 3 = 47), o
+cliente, a venda com o total e o config.
 
 O caminho de desligamento também foi verificado no Linux: um `SIGTERM` no
 serviço roda o backup final e o arquivo resultante tem os mesmos dados da
 origem.
 
-> O `.db` é copiado **antes** do `-wal`, nessa ordem. É a ordem segura: o WAL
-> copiado nunca é mais velho que o `.db`, então o SQLite reaplica os frames até
-> o último commit completo. Todo backup passa por `wal_checkpoint(TRUNCATE)`
-> antes de copiar, o que faz o `.db` sozinho já ser um banco fechado.
+> O backup usa `VACUUM INTO`: a cópia sai inteira em **um arquivo só**, já com
+> o WAL aplicado. Não existe mais a janela em que o `.db` e o `-wal` não batem
+> (uma venda entrando no meio da cópia). A cópia de arquivo continua como
+> reserva, para quando o banco não estiver disponível para o `VACUUM`.
 
 **Falta só treinar o gerente:** mostrar onde ficam os backups e como restaurar
 na prática (`sudo systemctl stop sudam-pdv`, copiar `sudam.<carimbo>` de volta
-para `/var/lib/sudam-pdv/sudam.db`, `sudo systemctl start sudam-pdv`).
+para `/var/lib/sudam-pdv/sudam.db`, apagar o `sudam.db-wal`/`-shm` antigo,
+`sudo systemctl start sudam-pdv`).
 
 ## Pendências técnicas conhecidas
 
-- **Estoque local não reconcilia sozinho.** Depois de uma venda o PDV puxa o
-  estoque do servidor, mas não há reconciliation periódica: se alguém editar
-  produto em dois caixas fora do fluxo normal, a diferença só aparece quando
-  alguém olha.
+- **Estoque local reconcilia sozinho.** *(resolvido)* — `js/app.js` chama
+  `Store.reconciliarEstoque()` a cada 5 min e ao voltar o foco na aba
+  (`visibilitychange`). Os campos que só o servidor decide (`stock`, `price`,
+  `cost`, `min`, nome, categoria…) são puxados de `/api/produtos`; há travas
+  para não sobrescrever um lote de cadastro recém-feito nem rodar por baixo de
+  um modal aberto. Verificado em `estoque-reconcilia.mjs` (16 asserções).
 - **Histórico antigo não pagina.** `/api/vendas` aceita `limite`/`offset` e o
   cliente pede 500 por vez. Ao rolar a lista para trás, o histórico mais
   antigo não carrega sozinho.
-- **Sessão de 12 h.** Caixa aberto o expediente inteiro sem relogar passa de
-  12 h e a próxima venda cai em 401. O app avisa ("guardada para enviar
-  depois") mas não força relogin.
+- **Sessão de 12 h.** *(resolvido)* — a sessão usa janela deslizante
+  (`renovarSessao` em `auth.mjs`): cada requisição empurra o vencimento, então
+  quem opera o dia inteiro praticamente não vê a sessão morrer.
 - ~~**Não há HTTPS.**~~ *(resolvido)* — `instalar-linux.sh --com-nginx` monta
   nginx na frente, com HTTP → HTTPS, e o Node passa a escutar só em
   `127.0.0.1`. O certificado é autoassinado (aviso do navegador na primeira
@@ -134,44 +164,56 @@ para `/var/lib/sudam-pdv/sudam.db`, `sudo systemctl start sudam-pdv`).
 
 ## Ainda resolver antes de abrir a loja
 
-Estes pontos não bloqueiam a instalação, mas são os que eu corrigiria antes de
-confiar o caixa a outro pessoa:
+Estes pontos não bloqueiam a instalação. A maior parte já foi fechada (ver
+*(resolvido)* abaixo); o que sobra é decisão de arquitetura ou melhoria:
 
-- **`/api/migrar` responde sem token enquanto o banco não tem usuário.** Numa
-  rede nova, quem chegar primeiro cria o admin. É o comportamento do primeiro
-  acesso e precisa ser feito **em frente à máquina**, não de outro equipamento.
-- **`unhandledRejection` ainda só registra.** O `uncaughtException` já foi
-  corrigido (fecha o banco e sai com código 1, e o systemd reinicia em 3 s), mas
-  a rejeição não tratada ainda passa. Menos grave: rejeição não sincronizada não
-  costuma deixar o estado gravado pela metade. Fechar do mesmo jeito.
-- **Rate limit do login não enxerga `X-Forwarded-For`.** Atrás do nginx, todos
-  os clientes parecem vir de `127.0.0.1` e compartilham o mesmo balde — um
-  caixa travando o login trava os outros.
-- **Permissões de caixa.** Caixa ainda pode mexer em estoque, clientes e
-  lançamentos financeiros. Se o perfil "operador" for restrito, vale fechar.
-- **Dinheiro em `REAL` no SQLite.** Cada linha é arredondada para centavos no
-  servidor, o que fecha a divergência de exibição, mas o tipo continua sendo
-  ponto flutuante. Migrar para centavos inteiros é o corte limpo.
-- **Snapshot copia `.db` e `-wal` separados.** Se um venda cair entre uma
-  cópia e outra, o par pode não bater. A API de backup do próprio SQLite
-  (`node:sqlite`) resolve; hoje é cópia de arquivo.
-- **`innerHTML` em quase toda a tela.** Funciona e é o padrão do app, mas
-  qualquer campo do banco esquecido no `esc()` é HTML injetado. O `emoji` do
-  produto escapou em ~15 lugares e já foi corrigido; `frontend-seguro.mjs` agora
-  trava a recaída. Ainda não há teste de navegador — só a guarda estática.
-- **No Windows o PDV não tem TLS.** O servidor abre em `0.0.0.0:8787` e o
-  instalador não cria regra de firewall, então o token de sessão e a senha do
-  caixa cruzam a rede local em texto puro. No Linux há nginx com HTTPS (autoassinado).
-  Para o Windows, o corte é: regra de firewall liberando 8787 só para a sub-rede,
-  ou proxy TLS igual ao Linux.
-- **O banco do Windows fica dentro da pasta do programa.** `banco.mjs` resolve
-  `servidor/dados/sudam.db`, ou seja, `%LOCALAPPDATA%\Programs\Sudam Gestao PDV\...`.
-  Apagar ou reinstalar a pasta perde o histórico de vendas. No Linux os dados
-  vivem em `/var/lib/sudam-pdv`, fora do app. O corte é o mesmo dos dois lados:
-  `%ProgramData%\Sudam Gestao PDV\dados`, com o caminho vindo de `SUDAM_DB`.
-- **`COMPILAR-INSTALADOR.bat` anuncia a versão no texto.** A linha de sucesso
-  escreve `1.0.0` fixo, então passa a mentir quando o `AppVersion` do `.iss`
-  subir. Sem impacto no instalador gerado.
+- **`/api/migrar` no primeiro acesso.** *(endurecido)* — sem sessão somente em
+  conexão local, exige um administrador ativo e revalida dentro da transação
+  para impedir que duas inicializações concorrentes substituam a conta.
+- **HTTP em interface de rede.** *(endurecido)* — por padrão o servidor recusa
+  iniciar sem TLS quando escuta fora de localhost. O instalador Linux exige
+  `--com-nginx`; HTTP direto exige a opção explícita `--permitir-http-lan`.
+  No Windows, o atalho usa localhost sem TLS e libera a rede apenas com TLS.
+- **`unhandledRejection` também fecha o banco.** *(resolvido)* — a rejeição não
+  tratada passa pelo mesmo caminho do `uncaughtException`: checkpoint, fecha o
+  banco e sai com código 1. O systemd reinicia sobre o banco em disco, íntegro.
+  (Havia ainda dois handlers registrados; o duplicado foi removido.)
+- **Rate limit atrás do proxy.** *(resolvido)* — com `SUDAM_TRUST_PROXY=1`
+  (ligado no drop-in do nginx) o IP vem do `X-Real-IP`, configurado pelo proxy
+  com `$remote_addr`; `X-Forwarded-For` não é usado para confiar na origem.
+- **Permissões de escrita por coleção.** *(resolvido)* — o servidor recusa
+  escrita que a tela já esconde do perfil (`podeEscrever`, espelhando o
+  `can()` do cliente). Verificado no e2e.
+- **Dinheiro em centavos inteiros.** *(resolvido)* — o servidor calcula e
+  guarda valores em centavos (`dinheiro.mjs`); as colunas de dinheiro no SQLite
+  são `INTEGER` e bancos antigos migram uma vez no boot. O JSON do cliente
+  continua em reais. Verificado em `centavos-migracao.mjs` e no e2e.
+- **Snapshot consistente.** *(resolvido)* — o backup usa `VACUUM INTO`, que
+  grava a cópia inteira em um arquivo só, já com o WAL aplicado. Não existe
+  mais o par `.db`/`-wal` para desencontrar; a cópia de arquivo fica só como
+  reserva, se o `VACUUM` não puder rodar.
+- **Render por `innerHTML` → `createElement`.** *(resolvido)* — `js/ui.js`
+  (modais, toasts, formulários, gráficos, Pix), `js/pdv.js` (catálogo,
+  carrinho, pagamento, modais do caixa, layout) e `js/app.js` (todas as telas
+  de gestão: dashboard, vendas, produtos, compras, clientes, financeiro,
+  contas, relatórios, ajustes e a ferramenta de preços) montam DOM: todo valor
+  do banco entra como nó de texto (`textContent`) ou atributo, nunca como
+  marcação. O que ainda usa string é o corpo dos modais de formulário —
+  markup constante definido no código, com todo campo de dado passando por
+  `esc()`/`UI.field()`; o `frontend-seguro.mjs` trava a recaída no fonte e o
+  `navegador-seguro.mjs` confere nas telas reais (escape do dado + CSP
+  bloqueando script inline).
+- **Windows: TLS e firewall.** *(resolvido)* — o servidor aceita TLS por PFX
+  (`SUDAM_TLS=1` + `SUDAM_PFX` + `SUDAM_PFX_SENHA`); `GERAR-CERTIFICADO.ps1`
+  cria o certificado autoassinado sem administrador, e `LIBERAR-FIREWALL.bat`
+  libera a 8787 só para a rede local. Ambos são opcionais e estão no README.
+- **Banco do Windows fora da pasta do programa.** *(resolvido)* — o padrão
+  passou a ser `%ProgramData%\Sudam Gestao PDV\dados\sudam.db`. Numa instalação
+  antiga, o servidor copia o `servidor\dados\sudam.db` para o novo local no
+  primeiro boot e passa a usar a cópia.
+- **`COMPILAR-INSTALADOR.bat` anunciava a versão fixa.** *(resolvido)* — o
+  aviso agora lê o `AppVersion` do `instalador.iss`, então não mente quando a
+  versão sobe.
 
 ## Fora do escopo (decisão do cliente, não falta técnica)
 

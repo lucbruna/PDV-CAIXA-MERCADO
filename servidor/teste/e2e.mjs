@@ -17,7 +17,7 @@ for (const s of ['', '-wal', '-shm']) { try { rmSync(DB + s); } catch {} }
 
 const srv = spawn(process.execPath, ['servidor.mjs'], {
   cwd: process.argv[3],
-  env: { ...process.env, SUDAM_DB: DB, SUDAM_PORTA: String(PORTA) },
+  env: { ...process.env, SUDAM_DB: DB, SUDAM_PORTA: String(PORTA), SUDAM_HOST: '127.0.0.1' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 srv.stdout.on('data', () => {});
@@ -376,6 +376,19 @@ try {
   check('  e a config continua a de verdade',
     (await req('GET', '/api/config', undefined, token)).dados?.config?.storeName !== 'Hackeado');
 
+  /* Escrita por colecao: o cliente ja esconde Produtos/Financeiro do perfil
+     caixa, mas a rota aceitava qualquer sessao valida. Aqui o servidor passa a
+     recusar o que a tela nao oferece; Clientes continua liberado porque o
+     proprio PDV cadastra cliente para vender a prazo. */
+  const caixaProd = await req('POST', '/api/products', { lista: [{ id: 'cx1', name: 'Hack', price: 1, stock: 1 }] }, tCaixa);
+  check('caixa NAO grava produto -> 403', caixaProd.status === 403, 'status=' + caixaProd.status);
+  check('  e o produto nao entrou',
+    !(await req('GET', '/api/base', undefined, token)).dados?.produtos?.some((p) => p.id === 'cx1'));
+  const caixaEnt = await req('POST', '/api/entries', { lista: [{ id: 'cx2', amount: 1, type: 'saida' }] }, tCaixa);
+  check('caixa NAO grava lancamento financeiro -> 403', caixaEnt.status === 403, 'status=' + caixaEnt.status);
+  const caixaCli = await req('POST', '/api/customers', { lista: [{ id: 'cx3', name: 'Cliente do Caixa', debt: 0 }] }, tCaixa);
+  check('caixa GRAVA cliente (o PDV precisa) -> 200', caixaCli.status === 200, JSON.stringify(caixaCli.dados));
+
   const prodNeg = await req('POST', '/api/produtos', { lista: [{ id: 'pneg', name: 'Preco negativo', price: -500, stock: 5 }] }, token);
   check('produto com preco negativo -> 400', prodNeg.status === 400, 'status=' + prodNeg.status);
   const prodNeg2 = await req('POST', '/api/produtos', { lista: [{ id: 'pneg2', name: 'Estoque negativo', price: 5, stock: -999 }] }, token);
@@ -437,6 +450,43 @@ try {
   const grande = await req('POST', '/api/produtos', { id: 'g', name: 'x'.repeat(3 * 1024 * 1024) }, token);
   check('corpo de 3 MB -> 413 (teto de 2 MB)', grande.status === 413, 'status=' + grande.status);
   check('  motivo nomeado', grande.dados?.codigo === 'corpo_grande', JSON.stringify(grande.dados));
+
+  console.log('\n19b. Dinheiro em centavos inteiros');
+  /* 3 x 3,33 = 9,99 exato, e troco de R$ 10,00 sai 0,01 -- e nao
+     0,010000000000000426. */
+  await req('POST', '/api/produtos', { lista: [
+    { id: 'pcent', code: 'cent', name: 'Produto Centavo', price: 3.33, stock: 1000 },
+    { id: 'pdrift', code: 'drift', name: 'Produto Deriva', price: 0.07, stock: 1000 },
+  ] }, token);
+
+  const vCent = await req('POST', '/api/venda', {
+    id: 'vcent',
+    items: [{ id: 'pcent', name: 'Produto Centavo', qty: 3, price: 0.01 }],
+    total: 0.01, payments: [{ method: 'Dinheiro', amount: 10 }],
+  }, token);
+  check('3 x 3,33 fecha em 9,99', vCent.dados?.venda?.total === 9.99, 'total=' + vCent.dados?.venda?.total);
+  check('troco de R$ 10 sobre 9,99 e exatamente 0,01', vCent.dados?.venda?.change === 0.01, 'troco=' + vCent.dados?.venda?.change);
+  check('subtotal da linha tambem exato (9,99)', vCent.dados?.venda?.items?.[0]?.subtotal === 9.99, JSON.stringify(vCent.dados?.venda?.items));
+
+  /* 50 linhas de 0,07: a soma ingenua de ponto flutuante deriva, a de
+     centavos inteiros nao. */
+  const linhasDeriva = [];
+  for (let i = 0; i < 50; i++) linhasDeriva.push({ id: 'pdrift', name: 'Produto Deriva', qty: 1, price: 0.07 });
+  const vDrift = await req('POST', '/api/venda', {
+    id: 'vdrift', items: linhasDeriva,
+    total: 3.5, payments: [{ method: 'Pix', amount: 3.5 }],
+  }, token);
+  check('50 linhas de 0,07 somam 3,50 exato', vDrift.dados?.venda?.total === 3.5, 'total=' + vDrift.dados?.venda?.total);
+
+  /* A coluna no banco guarda CENTAVOS inteiros; o JSON continua em reais. */
+  const bdCent = new DatabaseSync(DB);
+  check('coluna price em centavos (333)',
+    bdCent.prepare('SELECT price FROM produtos WHERE id = ?').get('pcent')?.price === 333);
+  check('coluna total em centavos (999)',
+    bdCent.prepare('SELECT total FROM vendas WHERE id = ?').get('vcent')?.total === 999);
+  check('coluna total da venda por Pix em centavos (350)',
+    bdCent.prepare('SELECT total FROM vendas WHERE id = ?').get('vdrift')?.total === 350);
+  bdCent.close();
 
   console.log('\n20. Logout (por ultimo: mata o token)');
   check('logout 200', (await req('POST', '/api/logout', {}, token)).status === 200);

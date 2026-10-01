@@ -6,9 +6,10 @@
  *
  * Servir o app pela mesma origem e obrigatorio, nao uma preferencia: uma
  * pagina aberta em file:// tem origem null e o navegador bloqueia qualquer
- * chamada a um servidor de rede. Os 5 caixas abrem http://IP-DO-MINI-PC:8787.
+ * chamada a um servidor de rede. Os caixas usam HTTPS quando o listener e remoto.
  */
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { createServer as createHttpsServer } from 'node:https';
 import { readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
@@ -18,7 +19,8 @@ import { networkInterfaces } from 'node:os';
 import * as banco from './banco.mjs';
 import { gerarHash, conferir, hashAntigo, criarSessao, usuarioDaSessao, encerrarSessao, iniciarSessoes, renovarSessao } from './auth.mjs';
 import { registrarVenda, estornarVenda, proximoSeq } from './venda.mjs';
-import { iniciarBackup, fazerBackupAgora } from './backup.mjs';
+import { iniciarBackup, fazerBackupAgora, estadoBackup } from './backup.mjs';
+import { centavos, reais } from './dinheiro.mjs';
 
 const aqui = dirname(fileURLToPath(import.meta.url));
 const RAIZ_APP = join(aqui, '..');
@@ -54,9 +56,30 @@ const TENTATIVAS = new Map();
 const JANELA_MS = 5 * 60 * 1000;
 const MAX_TENTATIVAS = 8;
 
+/* Quando o Node fica atras do nginx (SUDAM_TRUST_PROXY=1), TODO request chega
+ * de 127.0.0.1: o limite por IP vira um balde unico e um caixa errando a senha
+ * trava o login dos outros. Com a flag ligada, o IP real vem de X-Real-IP,
+ * configurado pelo nginx com $remote_addr. X-Forwarded-For nao e confiavel:
+ * um cliente pode enviar valores antes do proxy acrescentar o proprio hop. */
+const CONFIA_PROXY = process.env.SUDAM_TRUST_PROXY === '1';
+
+function ipCliente(req) {
+  if (CONFIA_PROXY) {
+    /* O nginx configura X-Real-IP com $remote_addr (sobrescrito pelo proxy).
+       X-Forwarded-For pode conter valores enviados pelo cliente. */
+    const real = req.headers['x-real-ip'];
+    if (typeof real === 'string' && real.trim()) return real.trim();
+  }
+  return (req.socket && req.socket.remoteAddress) || 'desconhecido';
+}
+
+function requisicaoLocal(req) {
+  const ip = String(ipCliente(req)).replace(/^::ffff:/i, '');
+  return ip === '127.0.0.1' || ip === '::1';
+}
+
 function chaveTentativa(req, usuario) {
-  const ip = (req.socket && req.socket.remoteAddress) || 'desconhecido';
-  return `${ip}|${String(usuario || '').toLowerCase()}`;
+  return `${ipCliente(req)}|${String(usuario || '').toLowerCase()}`;
 }
 
 function excedeu(req, usuario) {
@@ -148,14 +171,27 @@ async function corpo(req, limite = CORPO_PADRAO) {
     throw Object.assign(new Error('Corpo grande demais.'), { status: 413, codigo: 'corpo_grande' });
   }
   if (!pedacos.length) return {};
-  try { return JSON.parse(Buffer.concat(pedacos).toString('utf8')); }
-  catch { throw Object.assign(new Error('Corpo invalido.'), { status: 400 }); }
+  const texto = Buffer.concat(pedacos).toString('utf8').replace(/^\uFEFF/, '');
+  try { return JSON.parse(texto); }
+  catch (e) {
+    /* Diagnostico sem registrar dados sensiveis (senha/token/corpo): permite
+       identificar cliente, rota, formato anunciado e causa exata do parse. */
+    console.warn('[json] corpo invalido', {
+      metodo: req.method,
+      rota: req.url,
+      contentType: req.headers['content-type'] || '(ausente)',
+      bytes: tamanho,
+      motivo: e.message,
+    });
+    throw Object.assign(new Error('Corpo invalido.'), { status: 400, codigo: 'json_invalido' });
+  }
 }
 
 function semente() {
   return {
     storeName: 'Mercadinho Sudam II',
     paymentMethods: ['Dinheiro', 'Pix', 'Débito', 'Crédito', 'Crediário'],
+    pix: { pixKey: '', city: '' },
     maxDiscount: 100,
     allowNegativeStock: false,
     requireCustomerOnCredit: true,
@@ -187,6 +223,36 @@ function exigeGerente(res, oQue) {
   return null;
 }
 
+/* Quem pode ESCREVER cada colecao. O cliente ja esconde as telas por perfil
+ * (can() em js/store.js), mas a rota aceitava qualquer sessao: um usuario
+ * "caixa" podia reescrever produto, fornecedor e lancamento por um POST
+ * direto, mesmo sem essas telas existirem para ele. O mapa abaixo espelha
+ * exatamente o can() do cliente, para fechar o buraco sem quebrar nenhum
+ * caminho legitimo -- quem a tela deixa entrar, o servidor deixa gravar. */
+const PERMISSAO_COLECAO = {
+  products: 'products',
+  customers: 'customers',
+  suppliers: 'suppliers',
+  entries: 'finance',
+  purchases: 'purchases',
+  payables: 'payables',
+};
+const PERMISSOES = {
+  admin: null, // null = tudo
+  gerente: ['products', 'customers', 'suppliers', 'finance', 'purchases', 'payables', 'sales', 'pdv', 'reports', 'stock'],
+  estoque: ['products', 'stock', 'pdv'],
+  caixa: ['customers', 'sales', 'pdv'],
+};
+
+function podeEscrever(usuario, colecao) {
+  const perm = PERMISSAO_COLECAO[colecao];
+  if (!perm) return true; // colecao de operacao do PDV (ex.: heldSales)
+  const papel = String((usuario && usuario.role) || '').toLowerCase();
+  const lista = PERMISSOES[papel];
+  if (lista === null) return true;
+  return Array.isArray(lista) && lista.includes(perm);
+}
+
 /* ---------------- autenticacao ----------------
  *
  * Todo /api exige senao o token do /api/login. Antes disso qualquer
@@ -213,15 +279,12 @@ function tokenDoRequisicao(req, url) {
   return null;
 }
 
-/* A migracao e a unica rota de escrita liberada sem sessao, e apenas
- * enquanto o banco nao tiver nenhum usuario: e o primeiro acesso, quando
- * ainda nao existe conta para fazer login. Depois do primeiro usuario, a
- * rota passa a exigir token como todas as outras. Sem essa regra o sistema
- * nao inicializaria -- e sem o "count == 0" a rota ficaria aberta para
- * qualquer um da rede reescrever o banco. */
-function migracaoLiberada(chave) {
+/* A migracao inicial e a unica escrita liberada sem sessao; somente conexoes
+ * locais podem usa-la e o estado e revalidado na transacao. Depois do primeiro
+ * usuario, migracoes exigem sessao de gerente ou administrador. */
+function migracaoLiberada(chave, req) {
   if (chave !== 'POST /api/migrar') return false;
-  return db.prepare('SELECT COUNT(*) AS n FROM usuarios').get().n === 0;
+  return requisicaoLocal(req) && db.prepare('SELECT COUNT(*) AS n FROM usuarios').get().n === 0;
 }
 
 function exigeSessao(req, res, url, chave) {
@@ -255,8 +318,10 @@ rota('GET', '/api/status', async (req, res) => {
     nome: 'Sudam Gestao PDV',
     versao: banco.lerMeta(db, 'versao') || '1.0.0',
     migrado: banco.lerMeta(db, 'migrado') === 'sim',
+    configurado: db.prepare('SELECT COUNT(*) AS n FROM usuarios').get().n > 0,
     produtos: db.prepare('SELECT COUNT(*) AS n FROM produtos').get().n,
     vendas: db.prepare('SELECT COUNT(*) AS n FROM vendas').get().n,
+    caixasAbertos: db.prepare('SELECT COUNT(*) AS n FROM turnos WHERE closedAt IS NULL').get().n,
     agora: new Date().toISOString(),
   });
 });
@@ -297,12 +362,72 @@ rota('POST', '/api/logout', async (req, res, url) => {
   json(res, { ok: true });
 });
 
+rota('POST', '/api/senha', async (req, res) => {
+  const { atual, nova } = await corpo(req);
+  if (typeof nova !== 'string' || nova.length < 12 || nova.length > 256) {
+    throw Object.assign(new Error('A nova senha deve ter entre 12 e 256 caracteres.'), { status: 400 });
+  }
+  const registro = db.prepare('SELECT json FROM usuarios WHERE lower(username) = lower(?)').get(req.usuario.username);
+  if (!registro) throw Object.assign(new Error('Usuario nao encontrado.'), { status: 404 });
+  const conta = JSON.parse(registro.json);
+  const senhaAtualValida = conta.senhaHash
+    ? conferir(atual, conta.sal, conta.senhaHash)
+    : !!conta.passHash && conta.passHash === hashAntigo(atual);
+  if (!senhaAtualValida) {
+    throw Object.assign(new Error('A senha atual esta incorreta.'), { status: 401, codigo: 'senha_atual_incorreta' });
+  }
+  const { sal, hash } = gerarHash(nova);
+  conta.sal = sal;
+  conta.senhaHash = hash;
+  delete conta.passHash;
+  banco.gravar(db, 'usuarios', conta);
+  db.prepare('DELETE FROM sessoes WHERE lower(usuario) = lower(?) AND token <> ?').run(conta.username, req.token);
+  json(res, { ok: true });
+});
+
+/* Novas contas precisam ser gravadas no servidor, pois os caixas autenticam
+   aqui. Criar no localStorage de um terminal isolado impede os outros caixas
+   de reconhecerem o operador. Somente administradores criam contas. */
+rota('POST', '/api/usuarios', async (req, res) => {
+  if (!req.usuario || String(req.usuario.role).toLowerCase() !== 'admin') {
+    return exigeGerente(res, 'criar usuarios');
+  }
+  const d = await corpo(req);
+  const name = String(d.name || '').trim();
+  const username = String(d.username || '').trim().toLowerCase();
+  const senha = d.senha;
+  const role = String(d.role || 'caixa').toLowerCase();
+  if (!name || name.length > 80) throw Object.assign(new Error('Informe um nome valido.'), { status: 400 });
+  if (!/^[a-z0-9._-]{2,32}$/.test(username)) {
+    throw Object.assign(new Error('O usuario deve ter de 2 a 32 caracteres: letras, numeros, ponto, hifen ou sublinhado.'), { status: 400 });
+  }
+  if (typeof senha !== 'string' || senha.length < 4 || senha.length > 256) {
+    throw Object.assign(new Error('A senha deve ter entre 4 e 256 caracteres.'), { status: 400 });
+  }
+  if (!['admin', 'gerente', 'caixa', 'estoque'].includes(role)) {
+    throw Object.assign(new Error('Perfil invalido.'), { status: 400 });
+  }
+  if (db.prepare('SELECT 1 FROM usuarios WHERE lower(username) = lower(?)').get(username)) {
+    throw Object.assign(new Error('Este usuario ja existe.'), { status: 409 });
+  }
+  const { sal, hash } = gerarHash(senha);
+  const usuario = {
+    id: 'u_' + randomUUID(), name, username, role, active: true,
+    sal, senhaHash: hash, createdAt: new Date().toISOString(),
+  };
+  banco.gravar(db, 'usuarios', usuario);
+  const { sal: _sal, senhaHash: _hash, ...publico } = usuario;
+  json(res, { usuario: publico }, 201);
+});
+
 /* O cliente mantem o objeto db em memoria com a mesma forma; este endpoint e
    a fonte da verdade para tudo que muda com pouca frequencia. */
 rota('GET', '/api/base', async (req, res) => {
   json(res, {
     config: { ...semente(), ...banco.lerConfig(db) },
     produtos: banco.listar(db, 'produtos'),
+    compras: banco.listar(db, 'compras'),
+    lancamentos: banco.listar(db, 'lancamentos'),
     clientes: banco.listar(db, 'clientes'),
     fornecedores: banco.listar(db, 'fornecedores'),
     usuarios: banco
@@ -361,6 +486,19 @@ rota('POST', '/api/venda', async (req, res) => {
     return json(res, { venda: anterior, repetida: true, divergentes: anterior.divergentes || [] });
   }
 
+  if (venda.shiftId) {
+    const turno = banco.obter(db, 'turnos', String(venda.shiftId));
+    /* Turnos de instalações antigas podem existir só no navegador. Se o
+       servidor conhece o turno, aplica a titularidade; um ID local ausente
+       não altera turno algum e continua compatível com a fila legada. */
+    if (turno && turno.closedAt) {
+      throw Object.assign(new Error('O turno informado nao existe ou ja foi fechado.'), { status: 409, codigo: 'turno_indisponivel' });
+    }
+    if (turno && !ehGerente(req.usuario) && String(turno.operatorId || '') !== String(req.usuario.id || '')) {
+      return exigeGerente(res, 'registrar venda no turno de outro operador');
+    }
+  }
+
   const cfg = { ...semente(), ...banco.lerConfig(db) };
   /* O teto de desconto e decidido pelo servidor a partir do perfil, nao
      pelo que o caixa digitou. Um `discount: 99999` num corpo adulterado
@@ -406,6 +544,7 @@ rota('POST', '/api/venda/estornar', async (req, res) => {
    outra. */
 
 rota('POST', '/api/produtos', async (req, res) => {
+  if (!podeEscrever(req.usuario, 'products')) return exigeGerente(res, 'alterar produtos');
   const d = await corpo(req);
   const lista = Array.isArray(d.lista) ? d.lista : (d.lista ? [d.lista] : [d]);
   let n = 0;
@@ -429,6 +568,7 @@ rota('GET', '/api/produtos', async (req, res, url) => {
 });
 
 rota('POST', '/api/clientes', async (req, res) => {
+  if (!podeEscrever(req.usuario, 'customers')) return exigeGerente(res, 'alterar clientes');
   const d = await corpo(req);
   const lista = Array.isArray(d.lista) ? d.lista : (d.lista ? [d.lista] : [d]);
   let n = 0;
@@ -442,16 +582,24 @@ rota('POST', '/api/clientes', async (req, res) => {
 
 rota('POST', '/api/caixa/abrir', async (req, res) => {
   const t = await corpo(req);
-  /* Abertura guarda QUEM abriu. O estorno compara este campo para saber se o
-   * operador pode derrubar a venda. Sem ele, todo mundo pode derrubar tudo. */
+  const operador = req.usuario;
+  const id = String(t.id || 'T' + Date.now());
+  if (banco.obter(db, 'turnos', id)) {
+    throw Object.assign(new Error('Este turno ja existe.'), { status: 409 });
+  }
+  const abertura = Number(t.opening);
+  if (!Number.isFinite(abertura) || abertura < 0) {
+    throw Object.assign(new Error('Informe um fundo inicial valido.'), { status: 400 });
+  }
+  /* Identidade e nome do turno vêm da sessão, nunca do corpo do cliente. */
   const turno = {
-    id: t.id || 'T' + Date.now(),
-    operatorId: t.operatorId || (req.usuario && req.usuario.id) || null,
-    operator: t.operator || (req.usuario && req.usuario.name) || null,
+    id,
+    operatorId: operador.id,
+    operator: operador.name,
     openedAt: new Date().toISOString(),
     closedAt: null,
-    opening: Number(t.opening) || 0,
-    cashExpected: Number(t.opening) || 0,
+    opening: reais(centavos(abertura)),
+    cashExpected: reais(centavos(abertura)),
     sales: [],
     movements: [],
     counted: null,
@@ -463,13 +611,41 @@ rota('POST', '/api/caixa/abrir', async (req, res) => {
 });
 
 rota('POST', '/api/caixa/fechar', async (req, res) => {
-  const { id, contado, cego } = await corpo(req);
+  const { id, contado, cego, nota, resumoPorForma, movimentacoes } = await corpo(req);
   const t = banco.obter(db, 'turnos', id);
   if (!t) throw Object.assign(new Error('Turno nao encontrado.'), { status: 404 });
+  if (t.closedAt) {
+    if (String(t.operatorId || '') === String(req.usuario.id || '') && Number(t.counted) === Number(contado)) {
+      return json(res, { turno: t, repetido: true });
+    }
+    throw Object.assign(new Error('Este turno ja foi fechado.'), { status: 409 });
+  }
+  if (!ehGerente(req.usuario) && String(t.operatorId || '') !== String(req.usuario.id || '')) {
+    return exigeGerente(res, 'fechar o turno de outro operador');
+  }
+  const valorContado = Number(contado);
+  if (!Number.isFinite(valorContado) || valorContado < 0) {
+    throw Object.assign(new Error('Informe uma contagem valida.'), { status: 400 });
+  }
+  const normalizarTipoMovimento = (m) => String(m && m.type || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const movimentosValidos = Array.isArray(movimentacoes) ? movimentacoes.filter((m) =>
+    m && (normalizarTipoMovimento(m) === 'Entrada' || normalizarTipoMovimento(m) === 'Saida') && Number.isFinite(Number(m.amount)) && Number(m.amount) > 0
+  ).map((m) => ({ date: String(m.date || ''), type: normalizarTipoMovimento(m) === 'Entrada' ? 'Entrada' : 'Saida',
+    amount: reais(centavos(m.amount)), reason: String(m.reason || '').slice(0, 300) })) : (t.movements || []);
+  const saldoMovimentos = (lista) => (lista || []).reduce((a, m) => a + (normalizarTipoMovimento(m) === 'Entrada' ? centavos(m.amount) : -centavos(m.amount)), 0);
+  const impactoMovimentos = saldoMovimentos(movimentosValidos) - saldoMovimentos(t.movements);
+  t.movements = movimentosValidos;
+  t.cashExpected = reais(centavos(t.cashExpected) + impactoMovimentos);
   t.closedAt = new Date().toISOString();
-  t.counted = Number(contado);
+  t.counted = reais(centavos(valorContado));
+  t.expectedCash = reais(centavos(t.cashExpected));
   t.blind = !!cego;
-  t.difference = Math.round(((Number(contado) || 0) - (Number(t.cashExpected) || 0)) * 100) / 100;
+  t.note = String(nota || '').slice(0, 1000);
+  t.totalsByMethod = resumoPorForma && typeof resumoPorForma === 'object' ? resumoPorForma : (t.totalsByMethod || {});
+  /* Diferenca de caixa em centavos: contar cedula por cedula e somar dezenas
+     de valores em ponto flutuante era exatamente o caso em que o
+     arredondamento vira centavo perdido no fechamento. */
+  t.difference = reais(centavos(valorContado) - centavos(t.cashExpected));
   banco.gravar(db, 'turnos', t);
   json(res, { turno: t });
 });
@@ -479,9 +655,22 @@ rota('POST', '/api/caixa/fechar', async (req, res) => {
  * instalacao); depois disso ela exige sessao, como todo o resto. */
 rota('POST', '/api/migrar', async (req, res) => {
   const d = await corpo(req, CORPO_MIGRACAO);
+  const primeiroAcesso = !req.usuario;
+  if (!primeiroAcesso && !ehGerente(req.usuario)) return exigeGerente(res, 'migrar os dados da loja');
+  if (primeiroAcesso) {
+    /* A conta inicial precisa existir antes de liberar a API autenticada. */
+    const administradores = (d.auth && Array.isArray(d.auth.users) ? d.auth.users : [])
+      .filter((u) => u && String(u.role || '').toLowerCase() === 'admin' && u.active !== false && u.username && u.passHash);
+    if (!administradores.length) {
+      throw Object.assign(new Error('A migracao inicial precisa incluir um administrador ativo.'), { status: 400 });
+    }
+  }
   const contagem = {};
-  db.exec('BEGIN');
+  db.exec('BEGIN IMMEDIATE');
   try {
+    if (primeiroAcesso && db.prepare('SELECT COUNT(*) AS n FROM usuarios').get().n !== 0) {
+      throw Object.assign(new Error('A configuracao inicial ja foi concluida.'), { status: 409 });
+    }
     banco.gravarVarios(db, 'produtos', d.products || []);
     banco.gravarVarios(db, 'clientes', d.customers || []);
     banco.gravarVarios(db, 'fornecedores', d.suppliers || []);
@@ -495,7 +684,12 @@ rota('POST', '/api/migrar', async (req, res) => {
     for (const u of (d.auth && d.auth.users) || []) {
       banco.gravar(db, 'usuarios', { ...u, passHash: u.passHash });
     }
-    if (d.config) banco.gravarConfig(db, d.config);
+    if (d.config) {
+      const cfg = { ...d.config };
+      const pix = cfg.pix && typeof cfg.pix === 'object' ? cfg.pix : {};
+      cfg.pix = { pixKey: String(pix.pixKey || '').slice(0, 200), city: String(pix.city || '').slice(0, 80) };
+      banco.gravarConfig(db, cfg);
+    }
     if (d.loyalty) banco.gravarConfig(db, { loyalty: d.loyalty });
     banco.gravarMeta(db, 'migrado', 'sim');
     banco.gravarMeta(db, 'migradoEm', new Date().toISOString());
@@ -540,6 +734,7 @@ for (const nome of COLECOES) {
   });
 
   rota('POST', `/api/${nome}`, async (req, res) => {
+    if (!podeEscrever(req.usuario, nome)) return exigeGerente(res, 'alterar esta area');
     const d = await corpo(req);
     const lista = Array.isArray(d) ? d : Array.isArray(d.lista) ? d.lista : [d.lista || d];
     const validos = lista.filter((o) => o && typeof o === 'object' && o.id);
@@ -567,6 +762,10 @@ for (const nome of COLECOES) {
 /* Sondagem autenticada e leve. Existe separada do /api/status (que e
    publico) porque e ela que o cliente usa para manter a sessao viva: tem de
    devolver 401 quando o token morreu, e o status publico nunca devolve. */
+rota('GET', '/api/backup/status', async (req, res) => {
+  json(res, { backup: estadoBackup() });
+});
+
 rota('GET', '/api/sessao', async (req, res) => {
   json(res, { usuario: { id: req.usuario.id, name: req.usuario.name, username: req.usuario.username, role: req.usuario.role } });
 });
@@ -581,7 +780,8 @@ rota('POST', '/api/config', async (req, res) => {
   if (!ehGerente(req.usuario)) return exigeGerente(res, 'alterar a configuracao da loja');
   const d = await corpo(req);
   const cfg = d.config && typeof d.config === 'object' ? d.config : d;
-  delete cfg.pix; // segredo do Pix nunca sobe cru pelo corpo da config
+  const pix = cfg.pix && typeof cfg.pix === 'object' ? cfg.pix : {};
+  cfg.pix = { pixKey: String(pix.pixKey || '').slice(0, 200), city: String(pix.city || '').slice(0, 80) };
   banco.gravarConfig(db, cfg);
   json(res, { ok: true, config: { ...semente(), ...banco.lerConfig(db) } });
 });
@@ -670,9 +870,7 @@ async function servirEstatico(req, res, url) {
 
 /* ---------------- HTTPS opcional ----------------
  *
- * Num PDV de LAN isolada, HTTP e aceitavel. Mas se a maquina estiver
- * atras de um roteador com port forwarding, ou se alguem acessar por
- * VPN, o token de sessao e a senha do admin trafegam em texto puro.
+ * Sem TLS, o token de sessao e a senha do admin trafegam em texto puro.
  *
  * Ligar e opcional e por ambiente: SUDAM_TLS=1 com SUDAM_CERT e
  * SUDAM_KEY apontando para um .pem. Sem essas duas, o servidor avisa e
@@ -681,6 +879,18 @@ async function servirEstatico(req, res, url) {
  */
 function opcoesTls() {
   if (process.env.SUDAM_TLS !== '1') return null;
+  /* PFX e o formato que o Windows gera sozinho (New-SelfSignedCertificate +
+     Export-PfxCertificate), sem precisar de openssl. Ver GERAR-CERTIFICADO.ps1. */
+  const pfx = process.env.SUDAM_PFX;
+  if (pfx) {
+    try {
+      return { pfx: readFileSync(pfx), passphrase: process.env.SUDAM_PFX_SENHA || undefined };
+    } catch (e) {
+      console.warn('  AVISO: nao consegui ler o PFX (' + e.message + ').');
+      console.warn('  Subindo em HTTP mesmo assim.');
+      return null;
+    }
+  }
   const cert = process.env.SUDAM_CERT;
   const key = process.env.SUDAM_KEY;
   if (!cert || !key) {
@@ -705,6 +915,18 @@ const HOST = process.env.SUDAM_HOST || '0.0.0.0';
 const tls = opcoesTls();
 const PROTOCOLO = tls ? 'https' : 'http';
 
+function hostEhLocal(host) {
+  return ['127.0.0.1', '::1', 'localhost'].includes(String(host).toLowerCase());
+}
+
+/* Um listener de rede em HTTP transmite senha e token sem protecao. Exigir
+   TLS para interfaces de rede; a excecao precisa ser uma escolha explícita
+   do operador para uma LAN isolada. O proxy nginx local continua permitido. */
+if (!tls && !hostEhLocal(HOST) && process.env.SUDAM_PERMITIR_HTTP_LAN !== '1') {
+  console.error('Inicializacao bloqueada: listener de rede sem HTTPS. Configure TLS ou SUDAM_PERMITIR_HTTP_LAN=1 apenas em LAN isolada.');
+  process.exit(1);
+}
+
 async function tratar(req, res) {
   const url = new URL(req.url, `${PROTOCOLO}://${req.headers.host || 'localhost'}`);
   const chave = `${req.method} ${url.pathname}`;
@@ -712,7 +934,7 @@ async function tratar(req, res) {
   try {
     if (fn) {
       /* Toda /api exige sessao, exceto as publicas declaradas acima. */
-      if (chave.includes(' /api/') && !ROTAS_PUBLICAS.has(chave) && !migracaoLiberada(chave)) {
+      if (chave.includes(' /api/') && !ROTAS_PUBLICAS.has(chave) && !migracaoLiberada(chave, req)) {
         if (!exigeSessao(req, res, url, chave)) return; // ja respondeu 401
       }
       return await fn(req, res, url);
@@ -778,14 +1000,23 @@ servidor.listen(PORTA, HOST, () => {
 /* ---------------- sobreviver a falha ----------------
  *
  * Este processo e a loja inteira: se ele cai, os 5 caixas param de vender ate
- * alguem notar e religar o mini PC. O padrao do Node 22+ e encerrar o
- * processo em `uncaughtException`/`unhandledRejection` — bom para um servidor
- * na nuvem que alguem monitora, ruim para o PDV de um mercadinho. Aqui a
- * falha e registrada e o servidor continua de pe; o que nao da para recuperar
- * (estado corrompido em memoria) e no caso raro de nao dar para seguir.
+ * alguem notar e religar o mini PC. Mesmo assim, continuar vendendo depois de
+ * uma falha nao tratada e pior: o estado em memoria pode estar pela metade
+ * (transacao aberta, sequencia lida fora de ordem) e a proxima venda grava
+ * sobre isso. A escolha e fechar e sair com erro -- o systemd Reinicia
+ * (Restart=always, com teto de 5 quedas por minuto) e o processo novo comeca
+ * do banco em disco, que esta integro. O mesmo vale para a promessa rejeitada.
  */
 process.on('unhandledRejection', (motivo) => {
-  console.error('[promessa rejeitada]', motivo);
+  console.error('[promessa rejeitada sem tratamento]', motivo);
+  /* Mesma decisao do uncaughtException: uma promessa rejeitada sem tratamento
+     costuma vir de uma gravacao que comecou e nao terminou. Seguir vendendo
+     sobre esse estado e o caminho para corromper dado; fechar e deixar o
+     systemd reerguer (Restart=always) reinicia sobre o banco em disco, que
+     esta integro. */
+  try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
+  try { db.close(); } catch {}
+  process.exit(1);
 });
 /* Uma excecao nao tratada nao significa "so um log": o estado em memoria pode
  * ja estar inconsistente (meio de gravacao begun, transacao aberta, sequencia
@@ -799,9 +1030,6 @@ process.on('uncaughtException', (e) => {
   try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
   try { db.close(); } catch {}
   process.exit(1);
-});
-process.on('unhandledRejection', (e) => {
-  console.error('[promessa rejeitada sem tratamento]', e);
 });
 
 /* Desligar com Ctrl+C ou pelo "Encerrar" do Windows precisa fechar o banco:

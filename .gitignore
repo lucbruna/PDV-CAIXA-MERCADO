@@ -33,3 +33,4 @@ ANUNCIO-MERCADO-LIVRE/**/*.zip
 # Ambiente
 .env
 .env.local
+*.pfx

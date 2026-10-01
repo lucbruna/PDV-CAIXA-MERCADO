@@ -14,6 +14,7 @@
 #   sudo ./instalar-linux.sh                    # instala
 #   sudo ./instalar-linux.sh --desinstalar      # remove (os dados ficam)
 #   sudo ./instalar-linux.sh --com-nginx        # instala + proxy HTTPS local
+#   sudo ./instalar-linux.sh --permitir-http-lan # somente em LAN isolada
 #   sudo ./instalar-linux.sh --sem-systemd      # so copia, nao instala servico
 #
 # O instalador NAO apaga o banco em nenhum caminho. `--desinstalar` deixa
@@ -31,6 +32,7 @@ PORTA="${SUDAM_PORTA:-8787}"
 NODE_MIN_MAJOR=22
 NODE_MIN_MINOR=5      # node:sqlite foi estabilizado depois disso
 COM_NGINX=0
+HTTP_LAN=0
 COM_SYSTEMD=1
 ACAO=instalar
 
@@ -38,6 +40,7 @@ for arg in "$@"; do
   case "$arg" in
     --desinstalar) ACAO=desinstalar ;;
     --com-nginx)   COM_NGINX=1 ;;
+    --permitir-http-lan) HTTP_LAN=1 ;;
     --sem-systemd) COM_SYSTEMD=0 ;;
     --ajuda|-h)
       # imprime so o cabecalho em comentario, e nao o codigo depois dele
@@ -46,6 +49,10 @@ for arg in "$@"; do
     *) echo "Opcao desconhecida: $arg" >&2; exit 2 ;;
   esac
 done
+
+if [ "$ACAO" = instalar ] && [ "$COM_SYSTEMD" = 1 ] && [ "$COM_NGINX" = 0 ] && [ "$HTTP_LAN" = 0 ]; then
+  die "HTTPS e obrigatorio para acesso pela rede. Use --com-nginx ou, apenas numa LAN isolada, --permitir-http-lan."
+fi
 
 # ---------------- apresentacao ----------------
 verde()  { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -183,7 +190,8 @@ escreve_servico() {
   # systemd resolver pelo PATH, um Node instalado via nvm (que vive em
   # /home/usuario/.nvm/...) simplesmente nao seria encontrado pelo servico —
   # e o PDV sobe no terminal e nunca como servico, que e o pior jeito de falhar.
-  local node_bin; node_bin="$(command -v node)"
+  local node_bin allow_http_env=""; node_bin="$(command -v node)"
+  if [ "$HTTP_LAN" = "1" ]; then allow_http_env='Environment=SUDAM_PERMITIR_HTTP_LAN=1'; fi
   cat > /etc/systemd/system/sudam-pdv.service <<EOF
 [Unit]
 # O PDV precisa subir depois da rede, porque e ele que serve os caixas.
@@ -205,6 +213,7 @@ Environment=SUDAM_PORTA=$PORTA
 Environment=SUDAM_DB=$DATA_DIR/sudam.db
 Environment=SUDAM_BACKUP=$BACKUP_DIR
 Environment=SUDAM_HOST=0.0.0.0
+$allow_http_env
 # Em Linux o fuso do sistema ja e o da loja, mas fixar deixa o relatorio
 # igual em qualquer maquina em que o servidor for movido.
 Environment=TZ=America/Sao_Paulo
@@ -447,6 +456,10 @@ main() {
       cat > /etc/systemd/system/sudam-pdv.service.d/nginx.conf <<EOF
 [Service]
 Environment=SUDAM_HOST=127.0.0.1
+# Atras do nginx todo request chega de 127.0.0.1. Sem esta flag o limite de
+# tentativas de login vira um balde unico e um caixa errando a senha trava o
+# login dos outros. Com ela, o IP real vem do X-Forwarded-For do proxy.
+Environment=SUDAM_TRUST_PROXY=1
 EOF
     fi
     escreve_servico

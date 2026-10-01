@@ -6,6 +6,7 @@
 
   var UI = global.UI, Store = global.Store, PDV = global.PDV;
   var $ = UI.$, $$ = UI.$$, esc = UI.esc, money = UI.money, icon = UI.icon;
+  var el = UI.el, iconEl = UI.iconEl, frag = UI.frag;
 
   var PAGES = [
     { id: 'dashboard', label: 'Início',    icon: 'home',      perm: null },
@@ -26,9 +27,9 @@
   function applyTheme(t) {
     document.documentElement.setAttribute('data-theme', t);
     var meta = document.querySelector('meta[name=theme-color]');
-    if (meta) meta.setAttribute('content', t === 'dark' ? '#0b1220' : '#e6ecf3');
+    if (meta) meta.setAttribute('content', t === 'dark' ? '#0b1220' : '#e3eaf3');
     var b = $('#themeBtn');
-    if (b) b.innerHTML = icon(t === 'dark' ? 'sun' : 'moon', 15);
+    if (b) UI.fill(b, iconEl(t === 'dark' ? 'sun' : 'moon', 15));
   }
   function toggleTheme() {
     var next = Store.db.config.theme === 'dark' ? 'light' : 'dark';
@@ -52,24 +53,22 @@
   function showLogin(msg) {
     var a = $('#authScreen');
     a.classList.remove('hidden');
-    a.innerHTML =
-      '<div class="auth-box">' +
-        '<div class="auth-logo">' + icon('cart', 30) + '</div>' +
-        '<h2>Sudam Gestão</h2>' +
-        '<p class="sub">Frente de caixa e gestão do mercadinho</p>' +
-        '<div class="auth-card">' +
-          (msg ? '<div class="auth-err show">' + esc(msg) + '</div>' : '') +
-          '<label class="lbl">Usuário</label>' +
-          '<input class="field" id="authUser" autocomplete="username" placeholder="Digite seu usuário">' +
-          '<label class="lbl">Senha</label>' +
-          '<input class="field" id="authPass" type="password" autocomplete="current-password" placeholder="Digite sua senha">' +
-          '<button class="auth-btn" id="authGo">' + icon('logout', 17) + ' Entrar no sistema</button>' +
-          '<div class="auth-qk">' +
-            '<button data-qk="admin">Administrador<small>admin / 1234</small></button>' +
-            '<button data-qk="caixa">Caixa 1<small>caixa1 / 0000</small></button>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
+    UI.fill(a, el('div', { class: 'auth-box' }, [
+      el('div', { class: 'auth-logo' }, iconEl('cart', 30)),
+      el('h2', null, 'Sudam Gestão'),
+      el('p', { class: 'sub' }, 'Frente de caixa e gestão do mercadinho'),
+      el('div', { class: 'auth-card' }, [
+        msg ? el('div', { class: 'auth-err show' }, msg) : null,
+        el('label', { class: 'lbl' }, 'Usuário'),
+        el('input', { class: 'field', id: 'authUser', autocomplete: 'username', placeholder: 'Digite seu usuário' }),
+        el('label', { class: 'lbl' }, 'Senha'),
+        el('input', { class: 'field', id: 'authPass', type: 'password', autocomplete: 'current-password', placeholder: 'Digite sua senha' }),
+        el('button', { class: 'auth-btn', id: 'authGo' }, [iconEl('logout', 17), ' Entrar no sistema']),
+        el('div', { class: 'auth-qk' }, [
+          el('button', { 'data-qk': 'admin' }, ['Administrador', el('small', null, 'admin / 1234')])
+        ])
+      ])
+    ]));
 
     $('#authGo').onclick = attemptLogin;
     $('#authPass').addEventListener('keydown', function (e) { if (e.key === 'Enter') attemptLogin(); });
@@ -124,41 +123,61 @@
   function buildShell() {
     var u = Store.currentUser();
     var app = $('#app');
-    app.innerHTML =
-      '<nav class="rail">' +
-        '<div class="rail-logo">' + icon('cart', 21) + '</div>' +
-        '<div class="rail-nav" id="railNav"></div>' +
-        '<div class="rail-foot">' +
-          '<button class="rail-btn" id="themeBtn" title="Alternar tema (Ctrl+Shift+D)"></button>' +
-          '<button class="rail-btn" id="cfgBtn" title="Configurações (F12)">' + icon('gear', 19) + '<em>Ajustes</em></button>' +
-          '<button class="rail-btn" id="logoutBtn" title="Sair">' + icon('logout', 19) + '<em>Sair</em></button>' +
-        '</div>' +
-      '</nav>' +
-      '<div class="work">' +
-        '<header class="topbar">' +
-          '<div><h1 id="pageTitle">Início</h1><div class="sub" id="pageSub"></div></div>' +
-          '<div class="tb-sep"></div>' +
-          '<div class="tb-right">' +
-            '<span class="clock" id="clock"></span>' +
-            '<span class="chip" id="shiftChip"></span>' +
-            '<button class="btn sm" id="shiftBtn"></button>' +
-            '<div class="user-pill"><span class="avatar" id="avatar">' + esc((u ? u.name : '?').slice(0, 2).toUpperCase()) + '</span>' +
-            '<span><b>' + esc(u ? u.name : '') + '</b><small>' + esc(roleLabel(u)) + '</small></span></div>' +
-          '</div>' +
-        '</header>' +
-        '<div class="content" id="view"></div>' +
-      '</div>' +
-      '<div id="toastWrap" class="toast-wrap"></div>' +
-      '<input type="file" id="importFile" accept=".json,application/json" style="display:none">';
+    UI.fill(app, frag(
+      el('nav', { class: 'rail' }, [
+        el('div', { class: 'rail-logo' }, iconEl('cart', 21)),
+        el('div', { class: 'rail-nav', id: 'railNav' }),
+        el('div', { class: 'rail-foot' }, [
+          el('button', { class: 'rail-btn', id: 'themeBtn', title: 'Alternar tema (Ctrl+Shift+D)' }),
+          el('button', { class: 'rail-btn', id: 'cfgBtn', title: 'Configurações (F12)' }, [iconEl('gear', 19), el('em', null, 'Ajustes')]),
+          el('button', { class: 'rail-btn', id: 'logoutBtn', title: 'Sair' }, [iconEl('logout', 19), el('em', null, 'Sair')])
+        ])
+      ]),
+      el('div', { class: 'work' }, [
+        el('header', { class: 'topbar' }, [
+          el('div', null, [el('h1', { id: 'pageTitle' }, 'Início'), el('div', { class: 'sub', id: 'pageSub' })]),
+          el('div', { class: 'tb-sep' }),
+          el('div', { class: 'tb-right' }, [
+            el('span', { class: 'clock', id: 'clock' }),
+            el('span', { class: 'chip', id: 'shiftChip' }),
+            el('button', { class: 'btn sm', id: 'shiftBtn' }),
+            el('button', { class: 'btn sm', id: 'fullscreenBtn', title: 'Alternar tela cheia' }, 'Tela cheia'),
+            el('div', { class: 'user-pill' }, [
+              el('span', { class: 'avatar', id: 'avatar' }, (u ? u.name : '?').slice(0, 2).toUpperCase()),
+              el('span', null, [el('b', null, u ? u.name : ''), el('small', null, roleLabel(u))])
+            ])
+          ])
+        ]),
+        el('div', { class: 'content', id: 'view' })
+      ]),
+      el('div', { id: 'toastWrap', class: 'toast-wrap' }),
+      el('input', { type: 'file', id: 'importFile', accept: '.json,application/json', style: { display: 'none' } })
+    ));
 
     $('#themeBtn').onclick = toggleTheme;
     $('#cfgBtn').onclick = function () { go('settings'); };
     $('#logoutBtn').onclick = logout;
     $('#shiftBtn').onclick = toggleShift;
+    $('#fullscreenBtn').onclick = alternarTelaCheia;
+    document.addEventListener('fullscreenchange', atualizarBotaoTelaCheia);
     applyTheme(Store.db.config.theme);
     renderRail();
     tickClock();
     setInterval(tickClock, 15000);
+  }
+
+  function alternarTelaCheia() {
+    var acao = document.fullscreenElement
+      ? document.exitFullscreen()
+      : document.documentElement.requestFullscreen();
+    if (acao && acao.catch) acao.catch(function () {
+      UI.toast('O navegador nao permitiu abrir em tela cheia. Use F11.', 'warn');
+    });
+  }
+
+  function atualizarBotaoTelaCheia() {
+    var b = $('#fullscreenBtn');
+    if (b) b.textContent = document.fullscreenElement ? 'Sair da tela cheia' : 'Tela cheia';
   }
 
   function roleLabel(u) {
@@ -173,18 +192,19 @@
     var low = Store.db.products.filter(function (p) { return p.active && p.stock <= p.min; }).length;
     var debt = Store.db.customers.reduce(function (a, c) { return a + (Number(c.debt) || 0); }, 0);
 
-    nav.innerHTML = PAGES.filter(function (p) { return !p.perm || Store.can(p.perm) || p.perm === 'pdv'; }).map(function (p) {
-      var dot = '';
-      if (p.id === 'products' && low) dot = '<span class="dot"></span>';
-      if (p.id === 'customers' && debt > 0) dot = '<span class="dot" style="background:var(--amber)"></span>';
-      return '<button class="rail-btn" data-page="' + p.id + '" title="' + p.label + '">' + icon(p.icon, 19) +
-        '<em>' + p.label + '</em>' + dot + '</button>';
-    }).join('');
+    UI.fill(nav, PAGES.filter(function (p) { return !p.perm || Store.can(p.perm) || p.perm === 'pdv'; }).map(function (p) {
+      var dot = null;
+      if (p.id === 'products' && low) dot = el('span', { class: 'dot' });
+      if (p.id === 'customers' && debt > 0) dot = el('span', { class: 'dot', style: { background: 'var(--amber)' } });
+      return el('button', { class: 'rail-btn', 'data-page': p.id, title: p.label }, [iconEl(p.icon, 19), el('em', null, p.label), dot]);
+    }));
 
-    nav.addEventListener('click', function (e) {
+    /* onclick (e nao addEventListener): renderRail roda a cada render e os
+       listeners se acumulariam, disparando go() N vezes por clique. */
+    nav.onclick = function (e) {
       var b = e.target.closest('[data-page]');
       if (b) go(b.dataset.page);
-    });
+    };
   }
 
   function tickClock() {
@@ -205,17 +225,17 @@
     if (!chip || !btn) return;
     if (db.shift) {
       chip.className = 'chip ok';
-      chip.innerHTML = '<span class="pulse"></span> ' + esc(db.shift.operator) + ' · ' + money(db.shift.cashExpected) + ' em caixa';
+      UI.fill(chip, frag(el('span', { class: 'pulse' }), ' ' + db.shift.operator + ' · ' + money(db.shift.cashExpected) + ' em caixa'));
       chip.title = 'Clique para conferir e fechar o caixa';
       chip.onclick = closeShiftFlow;
       btn.className = 'btn sm warn';
-      btn.innerHTML = icon('lock', 13) + ' Fechar caixa';
+      UI.fill(btn, frag(iconEl('lock', 13), ' Fechar caixa'));
     } else {
       chip.className = 'chip err';
-      chip.innerHTML = '<span class="pulse"></span> Caixa fechado';
+      UI.fill(chip, frag(el('span', { class: 'pulse' }), ' Caixa fechado'));
       chip.onclick = toggleShift;
       btn.className = 'btn sm primary';
-      btn.innerHTML = icon('wallet', 13) + ' Abrir caixa';
+      UI.fill(btn, frag(iconEl('wallet', 13), ' Abrir caixa'));
     }
   }
 
@@ -243,7 +263,7 @@
     var byMethod = {};
     db.sales.filter(function (x) { return x.shiftId === s.id && x.status !== 'Estornada'; })
       .forEach(function (x) {
-        x.payments.forEach(function (p) { byMethod[p.method] = UI.round2((byMethod[p.method] || 0) + p.amount); });
+        x.payments.forEach(function (p) { var valor = p.amount - (p.method === 'Dinheiro' ? (x.change || 0) : 0); byMethod[p.method] = UI.round2((byMethod[p.method] || 0) + valor); });
       });
 
     UI.modal({
@@ -268,16 +288,27 @@
             return '<div class="stat-mini"><span>' + esc(m.type) + ' · ' + esc(m.reason) + '</span><b>' + (m.type === 'Entrada' ? '+' : '−') + ' ' + money(m.amount) + '</b></div>';
           }).join('') + '</div></div>' : ''),
       confirmText: 'Fechar caixa',
+      onMount: function (root, close) { root._closeShiftDialog = close; },
       onConfirm: function (root) {
         var d = UI.formData(root);
         var counted = UI.round2(UI.parseNum(d.counted));
         if (d.counted === '' || counted < 0) { UI.toast('Informe o dinheiro contado.', 'err'); return false; }
         var diff = UI.round2(counted - expected);
-        Store.closeShift(counted);
-        s.note = d.note || '';
-        s.voidedCount = 0;
-        Store.save();
-        rerender();
+        var finalizarLocal = function () {
+          Store.closeShift(counted);
+          s.note = d.note || ''; s.expectedCash = expected; s.totalsByMethod = byMethod;
+          s.voidedCount = 0; Store.save(); rerender();
+        };
+        if (API.estado && API.estado.online && API.fecharTurno) {
+          API.fecharTurno(s.id, counted, { nota: d.note || '', resumoPorForma: byMethod, movimentacoes: s.movements || [] }).then(function (r) {
+            if (!r.ok) { UI.toast(r.erro + ' O caixa continua aberto neste computador.', 'err', 7000); return; }
+            if (r.turno) { expected = Number(r.turno.cashExpected) || expected; diff = Number(r.turno.difference) || 0; Object.assign(s, r.turno); }
+            finalizarLocal(); root._closeShiftDialog();
+            UI.modal({ title: diff === 0 ? 'Caixa fechado sem diferenca' : 'Fechamento com diferenca', icon: diff === 0 ? 'check' : 'alert', size: 'sm', body: 'Esperado: ' + money(expected) + ' · Contado: ' + money(counted), confirmText: 'OK' });
+          });
+          return false;
+        }
+        finalizarLocal();
         UI.modal({
           title: diff === 0 ? 'Caixa fechado sem diferença' : (diff > 0 ? 'Sobra de ' + money(diff) : 'Falta de ' + money(-diff)),
           icon: diff === 0 ? 'check' : 'alert', size: 'sm', footer: false,
@@ -333,21 +364,70 @@
     view.appendChild(inner);
     return inner;
   }
-  function kpi(label, value, foot, tone, spark) {
-    return '<div class="card kpi ' + (tone || '') + '">' +
-      '<div class="kpi-label"><i></i>' + esc(label) + '</div>' +
-      '<div class="kpi-value num">' + value + '</div>' +
-      (foot ? '<div class="kpi-foot">' + foot + '</div>' : '') +
-      (spark ? UI.sparkline(spark) : '') + '</div>';
+
+  /* Uma view devolve string (telas ainda por migrar) ou nós montados com
+     createElement. pintar aceita os dois, para a migração ser por tela. */
+  function pintar(container, conteudo) {
+    while (container.firstChild) container.removeChild(container.firstChild);
+    if (typeof conteudo === 'string') container.innerHTML = conteudo;
+    else if (conteudo) container.appendChild(conteudo);
+  }
+  /* Variantes em NÓ. As versões em string continuam existindo para as telas
+     ainda por migrar, então a conversão pode ser feita tela a tela sem
+     quebrar as outras. Toda view nova usa as versões *El. */
+  function kpiEl(label, value, foot, tone, spark) {
+    return el('div', { class: 'card kpi ' + (tone || '') }, [
+      el('div', { class: 'kpi-label' }, el('i')),
+      el('div', { class: 'kpi-value num' }, value),
+      foot ? el('div', { class: 'kpi-foot' }, foot) : null,
+      spark ? UI.sparklineEl(spark) : null
+    ]);
+  }
+  function kpi(label, value, foot, tone, spark) { return kpiEl(label, value, foot, tone, spark).outerHTML; }
+
+  function cardEl(title, body, extra, iconName) {
+    var head = el('div', { class: 'card-head' }, el('h2', null, [iconName ? iconEl(iconName, 16) : null, title]));
+    UI.appendBody(head, extra || '');
+    var sec = el('section', { class: 'card' }, head);
+    UI.appendBody(sec, body);
+    return sec;
+  }
+  function card(title, body, extra, iconName) { return cardEl(title, body, extra, iconName).outerHTML; }
+
+  function emptyEl(msg, sub, ico) {
+    return el('div', { class: 'empty' }, [
+      el('span', { class: 'ico' }, iconEl(ico || 'info', 34)),
+      el('b', null, msg),
+      sub || ''
+    ]);
+  }
+  function empty(msg, sub, ico) { return emptyEl(msg, sub, ico).outerHTML; }
+
+  /* Cabeçalho padrão das telas. `actions` aceita nó ou markup constante. */
+  function pageHead(title, sub, actions) {
+    var box = el('div', { class: 'page-head' }, el('div', null, [el('h1', null, title), el('p', null, sub)]));
+    if (actions) {
+      var a = el('div', { class: 'actions' });
+      UI.appendBody(a, actions);
+      box.appendChild(a);
+    }
+    return box;
   }
 
-  function card(title, body, extra, iconName) {
-    return '<section class="card"><div class="card-head"><h2>' + (iconName ? icon(iconName, 16) : '') + esc(title) + '</h2>' +
-      (extra || '') + '</div>' + body + '</section>';
+  /* Botão com ícone opcional e ação real, sem onclick inline. */
+  function btn(label, iconName, cls, fn) {
+    return el('button', { class: cls || 'btn', onclick: fn || null },
+      iconName ? [iconEl(iconName, 14), ' ' + label] : label);
   }
 
-  function empty(msg, sub, ico) {
-    return '<div class="empty"><span class="ico">' + icon(ico || 'info', 34) + '</span><b>' + esc(msg) + '</b>' + esc(sub || '') + '</div>';
+  /* Tabela com cabeçalho. `headers` aceita string ou {label, right}. */
+  function tabela(headers, rows, foot) {
+    var thead = el('thead', null, el('tr', null, headers.map(function (h) {
+      var h2 = (h && typeof h === 'object') ? h : { label: h };
+      return el('th', h2.right ? { class: 'right' } : null, h2.label);
+    })));
+    return el('div', { class: 'table-wrap' },
+      el('table', null, [thead, el('tbody', null, rows), foot || null]));
   }
 
   function salesOfDay(dateStr) {
@@ -392,35 +472,45 @@
     var rev = totalOf(today), cost = costOf(today);
     var profit = UI.round2(rev - cost);
 
-    return '<div class="page-head"><div><h1>Bom dia, ' + esc((Store.currentUser() || {}).name || '') + '</h1>' +
-      '<p>' + new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }) +
-      ' — operação do ' + esc(db.config.storeName) + '.</p></div>' +
-      '<div class="actions"><button class="btn" onclick="App.go(\'products\')">' + icon('box', 14) + ' Produtos</button>' +
-      '<button class="btn primary" onclick="App.go(\'pdv\')">' + icon('cart', 14) + ' Abrir frente de caixa</button></div></div>' +
+    return frag(
+      pageHead('Bom dia, ' + ((Store.currentUser() || {}).name || ''),
+        new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }) +
+        ' — operação do ' + db.config.storeName + '.',
+        [
+          btn('Produtos', 'box', 'btn', function () { go('products'); }),
+          btn('Abrir frente de caixa', 'cart', 'btn primary', function () { go('pdv'); })
+        ]),
 
-      '<div class="grid kpis">' +
-        kpi('Vendas hoje', money(rev), today.length + ' operação(ões)', 'accent', week.map(function (w) { return w.v; })) +
-        kpi('Lucro estimado', money(profit), rev ? 'margem ' + UI.pct(rev ? profit / rev * 100 : 0) : 'sem vendas', 'teal') +
-        kpi('Ticket médio', money(today.length ? rev / today.length : 0), 'por operação') +
-        kpi('A receber (fiado)', money(debt), db.customers.filter(function (c) { return c.debt > 0; }).length + ' cliente(s)', 'purple') +
-        kpi('Valor em estoque', money(stockValue), db.products.length + ' produtos', 'blue') +
-      '</div>' +
+      el('div', { class: 'grid kpis' }, [
+        kpiEl('Vendas hoje', money(rev), today.length + ' operação(ões)', 'accent', week.map(function (w) { return w.v; })),
+        kpiEl('Lucro estimado', money(profit), rev ? 'margem ' + UI.pct(rev ? profit / rev * 100 : 0) : 'sem vendas', 'teal'),
+        kpiEl('Ticket médio', money(today.length ? rev / today.length : 0), 'por operação'),
+        kpiEl('A receber (fiado)', money(debt), db.customers.filter(function (c) { return c.debt > 0; }).length + ' cliente(s)', 'purple'),
+        kpiEl('Valor em estoque', money(stockValue), db.products.length + ' produtos', 'blue')
+      ]),
 
-      '<div class="grid two">' +
-        card('Vendas dos últimos 7 dias', UI.lineChart(week), '', 'chart') +
-        '<div class="grid" style="gap:13px">' +
-          card('Formas de pagamento (hoje)', paymentDonut(today)) +
-          card('Atenção necessária', attentionBlock(low, expiry, receivableOpen, payableOpen)) +
-        '</div>' +
-      '</div>' +
+      el('div', { class: 'grid two' }, [
+        cardEl('Vendas dos últimos 7 dias', UI.lineChartEl(week), '', 'chart'),
+        el('div', { class: 'grid', style: { gap: '13px' } }, [
+          cardEl('Formas de pagamento (hoje)', paymentDonut(today)),
+          cardEl('Atenção necessária', attentionBlock(low, expiry, receivableOpen, payableOpen))
+        ])
+      ]),
 
-      '<div class="grid two mt-2">' +
-        card('Movimento recente', recentSalesTable(db.sales.slice(0, 8)), '<button class="btn sm" onclick="App.go(\'sales\')">Ver todas</button>', 'receipt') +
-        card('Caixa e turno', shiftPanel(), '', 'wallet') +
-      '</div>' +
-      '<div style="height:10px"></div>' +
-      card('Produtos para repor', lowStockTable(low), low.length ? '<button class="btn sm" onclick="App.go(\'purchases\')">' + icon('truck', 13) + ' Montar compra</button>' : '', 'truck');
+      el('div', { class: 'grid two mt-2' }, [
+        cardEl('Movimento recente', recentSalesTable(db.sales.slice(0, 8)), btn('Ver todas', null, 'btn sm', function () { go('sales'); }), 'receipt'),
+        cardEl('Caixa e turno', shiftPanel(), '', 'wallet')
+      ]),
+      el('div', { style: { height: '10px' } }),
+      cardEl('Produtos para repor', lowStockTable(low),
+        low.length ? btn('Montar compra', 'truck', 'btn sm', function () { go('purchases'); }) : '', 'truck')
+    );
   };
+
+  /* Linha rótulo/valor usada em modais e painéis. */
+  function stat(label, value) {
+    return el('div', { class: 'stat-mini' }, [el('span', null, label), el('b', null, value)]);
+  }
 
   function paymentDonut(list) {
     var by = {};
@@ -428,73 +518,85 @@
       s.payments.forEach(function (p) { by[p.method] = UI.round2((by[p.method] || 0) + p.amount); });
     });
     var data = Object.keys(by).map(function (k) { return { l: k, v: by[k] }; });
-    if (!data.length) return empty('Nenhuma venda hoje', 'Os pagamentos aparecem aqui.');
-    return UI.donutChart(data);
+    if (!data.length) return emptyEl('Nenhuma venda hoje', 'Os pagamentos aparecem aqui.');
+    return UI.donutChartEl(data);
   }
 
   function attentionBlock(low, expiry, recv, pay) {
     var items = [];
-    if (low.length) items.push({ icon: 'alert', tone: 'amber', text: '<b>' + low.length + '</b> produto(s) abaixo do estoque mínimo', go: 'products' });
+    if (low.length) items.push({ icon: 'alert', text: [el('b', null, String(low.length)), ' produto(s) abaixo do estoque mínimo'], go: 'products' });
     var venc = recv.filter(function (e) { return e.due && UI.daysBetween(UI.today(), e.due) < 0; });
-    if (venc.length) items.push({ icon: 'debt', tone: 'red', text: '<b>' + venc.length + '</b>_receive(s) em atraso', go: 'payables' });
+    if (venc.length) items.push({ icon: 'debt', text: [el('b', null, String(venc.length)), ' título(s) em atraso'], go: 'payables' });
     var vencP = pay.filter(function (e) { return e.due && UI.daysBetween(UI.today(), e.due) < 0; });
-    if (vencP.length) items.push({ icon: 'invoice', tone: 'red', text: '<b>' + vencP.length + '</b> conta(s) a pagar vencida(s)', go: 'payables' });
+    if (vencP.length) items.push({ icon: 'invoice', text: [el('b', null, String(vencP.length)), ' conta(s) a pagar vencida(s)'], go: 'payables' });
     var soon = expiry.filter(function (p) { return UI.daysBetween(UI.today(), p.expiry) >= 0; });
-    if (soon.length) items.push({ icon: 'clock', tone: 'amber', text: '<b>' + soon.length + '</b> produto(s) vencendo em até 30 dias', go: 'products' });
-    if (!db_hasSales()) items.push({ icon: 'target', tone: 'blue', text: 'Cadastre produtos e faça a primeira venda', go: 'products' });
-    if (!items.length) return empty('Tudo em ordem', 'Nenhum alerta no momento.', 'check');
-    return '<div class="list-plain">' + items.map(function (i) {
-      return '<div class="list-item" data-go="' + i.go + '" style="cursor:pointer">' +
-        '<span class="thumb-emoji" style="background:var(--warn-bg);color:var(--amber)">' + icon(i.icon, 16) + '</span>' +
-        '<span class="grow"><small style="color:var(--text);font-size:12px">' + i.text + '</small></span>' +
-        icon('arrowR', 14) + '</div>';
-    }).join('') + '</div>';
+    if (soon.length) items.push({ icon: 'clock', text: [el('b', null, String(soon.length)), ' produto(s) vencendo em até 30 dias'], go: 'products' });
+    if (!db_hasSales()) items.push({ icon: 'target', text: 'Cadastre produtos e faça a primeira venda', go: 'products' });
+    if (!items.length) return emptyEl('Tudo em ordem', 'Nenhum alerta no momento.', 'check');
+    return el('div', { class: 'list-plain' }, items.map(function (i) {
+      return el('div', { class: 'list-item', 'data-go': i.go, style: { cursor: 'pointer' } }, [
+        el('span', { class: 'thumb-emoji', style: { background: 'var(--warn-bg)', color: 'var(--amber)' } }, iconEl(i.icon, 16)),
+        el('span', { class: 'grow' }, el('small', { style: { color: 'var(--text)', 'font-size': '12px' } }, i.text)),
+        iconEl('arrowR', 14)
+      ]);
+    }));
   }
   function db_hasSales() { return Store.db.sales.length > 0; }
 
   function lowStockTable(list) {
-    if (!list.length) return empty('Estoque em dia', 'Nenhum produto abaixo do mínimo.', 'check');
-    return '<div class="table-wrap"><table><thead><tr><th>Produto</th><th>Atual</th><th>Mínimo</th><th class="right">Sugestão</th><th>Situação</th></tr></thead><tbody>' +
+    if (!list.length) return emptyEl('Estoque em dia', 'Nenhum produto abaixo do mínimo.', 'check');
+    return tabela(['Produto', 'Atual', 'Mínimo', { label: 'Sugestão', right: true }, 'Situação'],
       list.slice(0, 12).map(function (p) {
         var sug = Math.max(0, (p.min * 3) - p.stock);
-        return '<tr><td><b>' + esc(p.emoji) + ' ' + esc(p.name) + '</b><br><span class="tiny muted">' + esc(p.code || '') + '</span></td>' +
-          '<td><span class="badge ' + (p.stock === 0 ? 'red' : 'amber') + '">' + p.stock + '</span></td>' +
-          '<td>' + p.min + '</td>' +
-          '<td class="right num"><b>' + money(sug * p.cost) + '</b><br><span class="tiny muted">' + sug + ' un</span></td>' +
-          '<td>' + (p.stock === 0 ? '<span class="badge red">ZERADO</span>' : '<span class="badge amber">BAIXO</span>') + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
+        return el('tr', null, [
+          el('td', null, [el('b', null, (p.emoji || '') + ' ' + p.name), el('br'), el('span', { class: 'tiny muted' }, p.code || '')]),
+          el('td', null, el('span', { class: 'badge ' + (p.stock === 0 ? 'red' : 'amber') }, String(p.stock))),
+          el('td', null, String(p.min)),
+          el('td', { class: 'right num' }, [el('b', null, money(sug * p.cost)), el('br'), el('span', { class: 'tiny muted' }, sug + ' un')]),
+          el('td', null, p.stock === 0 ? el('span', { class: 'badge red' }, 'ZERADO') : el('span', { class: 'badge amber' }, 'BAIXO'))
+        ]);
+      }));
   }
 
   function recentSalesTable(list) {
-    if (!list.length) return empty('Nenhuma venda ainda', 'Abra o caixa para começar a atender.', 'cart');
-    return '<div class="table-wrap"><table><thead><tr><th>Venda</th><th>Hora</th><th>Pagamento</th><th class="right">Total</th><th></th></tr></thead><tbody>' +
+    if (!list.length) return emptyEl('Nenhuma venda ainda', 'Abra o caixa para começar a atender.', 'cart');
+    return tabela(['Venda', 'Hora', 'Pagamento', { label: 'Total', right: true }, ''],
       list.map(function (s) {
-        return '<tr><td>#' + esc(s.id) + (s.status === 'Estornada' ? ' <span class="badge red">ESTORNADA</span>' : '') + '</td>' +
-          '<td>' + new Date(s.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + '</td>' +
-          '<td>' + esc(s.payments.map(function (p) { return p.method; }).join(', ')) + '</td>' +
-          '<td class="right num"><b>' + money(s.total) + '</b></td>' +
-          '<td class="right"><button class="btn sm" data-print="' + esc(s.id) + '">Imprimir</button></td></tr>';
-      }).join('') + '</tbody></table></div>';
+        return el('tr', null, [
+          el('td', null, ['#' + s.id, s.status === 'Estornada' ? el('span', { class: 'badge red' }, 'ESTORNADA') : null]),
+          el('td', null, new Date(s.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })),
+          el('td', null, s.payments.map(function (p) { return p.method; }).join(', ')),
+          el('td', { class: 'right num' }, el('b', null, money(s.total))),
+          el('td', { class: 'right' }, el('button', { class: 'btn sm', 'data-print': s.id }, 'Imprimir'))
+        ]);
+      }));
   }
 
   function shiftPanel() {
     var s = Store.db.shift;
     if (!s) {
-      return '<div class="empty"><span class="ico">' + icon('lock', 30) + '</span><b>Caixa fechado</b>' +
-        'Abra o caixa para registrar vendas e controlar o gaveteiro.</div>' +
-        '<button class="btn primary block mt-1" onclick="App.shiftAction()">' + icon('wallet', 15) + ' Abrir caixa</button>';
+      return frag(
+        el('div', { class: 'empty' }, [
+          el('span', { class: 'ico' }, iconEl('lock', 30)),
+          el('b', null, 'Caixa fechado'),
+          'Abra o caixa para registrar vendas e controlar o gaveteiro.'
+        ]),
+        btn('Abrir caixa', 'wallet', 'btn primary block mt-1', function () { toggleShift(); })
+      );
     }
     var todaySales = Store.db.sales.filter(function (x) { return x.shiftId === s.id && x.status !== 'Estornada'; });
     var cash = todaySales.reduce(function (a, x) {
       return a + x.payments.filter(function (p) { return p.method === 'Dinheiro'; }).reduce(function (b, p) { return b + p.amount; }, 0) - (x.change || 0);
     }, 0);
-    return '<div class="stat-mini"><span>Operador</span><b>' + esc(s.operator) + '</b></div>' +
-      '<div class="stat-mini"><span>Aberto desde</span><b>' + UI.dt(s.openedAt) + '</b></div>' +
-      '<div class="stat-mini"><span>Fundo inicial</span><b>' + money(s.opening) + '</b></div>' +
-      '<div class="stat-mini"><span>Vendas no turno</span><b>' + todaySales.length + ' · ' + money(totalOf(todaySales)) + '</b></div>' +
-      '<div class="stat-mini"><span>Dinheiro recebido</span><b>' + money(cash) + '</b></div>' +
-      '<div class="stat-mini total"><span>Esperado no gaveteiro</span><b>' + money(s.cashExpected) + '</b></div>' +
-      '<div class="row mt-2"><button class="btn block" onclick="App.shiftAction()">' + icon('lock', 14) + ' Conferir e fechar caixa</button></div>';
+    return frag(
+      stat('Operador', s.operator),
+      stat('Aberto desde', UI.dt(s.openedAt)),
+      stat('Fundo inicial', money(s.opening)),
+      stat('Vendas no turno', todaySales.length + ' · ' + money(totalOf(todaySales))),
+      stat('Dinheiro recebido', money(cash)),
+      el('div', { class: 'stat-mini total' }, [el('span', null, 'Esperado no gaveteiro'), el('b', null, money(s.cashExpected))]),
+      el('div', { class: 'row mt-2' }, btn('Conferir e fechar caixa', 'lock', 'btn block', function () { toggleShift(); }))
+    );
   }
 
   /* ---------- VENDAS ---------- */
@@ -514,45 +616,62 @@
     });
     var rev = totalOf(list), cost = costOf(list);
 
-    return '<div class="page-head"><div><h1>Vendas</h1><p>Histórico completo, estornos e reimpressão de cupons.</p></div>' +
-      '<div class="actions"><button class="btn" onclick="App.exportSales()">' + icon('down', 14) + ' Exportar CSV</button>' +
-      '<button class="btn primary" onclick="App.go(\'pdv\')">' + icon('cart', 14) + ' Nova venda</button></div></div>' +
+    var toolbar = el('div', { class: 'toolbar' }, [
+      el('div', { class: 'search-wrap' }, [iconEl('search', 15),
+        el('input', { class: 'field', id: 'saleQ', placeholder: 'Buscar por número, cliente, operador ou produto', value: f.q })]),
+      el('input', { class: 'field', style: { width: 'auto' }, type: 'date', id: 'saleFrom', value: f.from, title: 'De' }),
+      el('input', { class: 'field', style: { width: 'auto' }, type: 'date', id: 'saleTo', value: f.to, title: 'Até' }),
+      el('select', { class: 'field', style: { width: 'auto' }, id: 'saleMethod' },
+        [el('option', { value: 'all' }, 'Todas as formas')].concat(db.config.paymentMethods.map(function (m) {
+          var o = el('option', { value: m }, m);
+          if (f.method === m) o.setAttribute('selected', '');
+          return o;
+        }))),
+      el('button', { class: 'btn', id: 'saleClear' }, [iconEl('x', 13), ' Limpar'])
+    ]);
 
-      '<div class="grid kpis">' +
-        kpi('Vendas no filtro', money(rev), list.length + ' operação(ões)', 'accent') +
-        kpi('Custo dos itens', money(cost), 'base de custo atual') +
-        kpi('Lucro estimado', money(UI.round2(rev - cost)), rev ? 'margem ' + UI.pct(rev ? (rev - cost) / rev * 100 : 0) : '—', 'teal') +
-        kpi('Ticket médio', money(list.length ? rev / list.length : 0), 'por operação') +
-        kpi('Estornadas', String(db.sales.filter(function (s) { return s.status === 'Estornada'; }).length), 'não entram na receita', 'red') +
-      '</div>' +
+    return frag(
+      pageHead('Vendas', 'Histórico completo, estornos e reimpressão de cupons.', [
+        btn('Exportar CSV', 'down', 'btn', function () { exportSales(); }),
+        btn('Nova venda', 'cart', 'btn primary', function () { go('pdv'); })
+      ]),
 
-      card('Operações', '<div class="toolbar">' +
-        '<div class="search-wrap">' + icon('search', 15) + '<input class="field" id="saleQ" placeholder="Buscar por número, cliente, operador ou produto" value="' + esc(f.q) + '"></div>' +
-        '<input class="field" style="width:auto" type="date" id="saleFrom" value="' + esc(f.from) + '" title="De">' +
-        '<input class="field" style="width:auto" type="date" id="saleTo" value="' + esc(f.to) + '" title="Até">' +
-        '<select class="field" style="width:auto" id="saleMethod"><option value="all">Todas as formas</option>' +
-        db.config.paymentMethods.map(function (m) { return '<option value="' + esc(m) + '"' + (f.method === m ? ' selected' : '') + '>' + esc(m) + '</option>'; }).join('') + '</select>' +
-        '<button class="btn" id="saleClear">' + icon('x', 13) + ' Limpar</button>' +
-        '</div>' + salesTable(list), '', 'receipt');
+      el('div', { class: 'grid kpis' }, [
+        kpiEl('Vendas no filtro', money(rev), list.length + ' operação(ões)', 'accent'),
+        kpiEl('Custo dos itens', money(cost), 'base de custo atual'),
+        kpiEl('Lucro estimado', money(UI.round2(rev - cost)), rev ? 'margem ' + UI.pct(rev ? (rev - cost) / rev * 100 : 0) : '—', 'teal'),
+        kpiEl('Ticket médio', money(list.length ? rev / list.length : 0), 'por operação'),
+        kpiEl('Estornadas', String(db.sales.filter(function (s) { return s.status === 'Estornada'; }).length), 'não entram na receita', 'red')
+      ]),
+
+      cardEl('Operações', frag(toolbar, salesTable(list)), '', 'receipt')
+    );
   };
 
   function salesTable(list) {
-    if (!list.length) return empty('Nenhuma venda encontrada', 'Ajuste os filtros ou registre a primeira venda.', 'receipt');
-    return '<div class="table-wrap"><table><thead><tr><th>Venda</th><th>Data</th><th>Operador</th><th>Cliente</th><th>Itens</th><th>Pagamento</th><th class="right">Total</th><th></th></tr></thead><tbody>' +
+    if (!list.length) return emptyEl('Nenhuma venda encontrada', 'Ajuste os filtros ou registre a primeira venda.', 'receipt');
+    return tabela(
+      ['Venda', 'Data', 'Operador', 'Cliente', 'Itens', 'Pagamento', { label: 'Total', right: true }, ''],
       list.map(function (s) {
-        return '<tr data-sale="' + esc(s.id) + '" class="clickable">' +
-          '<td><b>#' + esc(s.id) + '</b>' + (s.status === 'Estornada' ? ' <span class="badge red">ESTORNADA</span>' : '') + '</td>' +
-          '<td class="nowrap">' + UI.dt(s.date) + '</td>' +
-          '<td>' + esc(s.operator) + '</td>' +
-          '<td>' + (s.customerName ? esc(s.customerName) : '<span class="muted">—</span>') + '</td>' +
-          '<td class="num">' + s.items.length + '</td>' +
-          '<td>' + s.payments.map(function (p) { return '<span class="badge">' + esc(p.method) + '</span>'; }).join(' ') + '</td>' +
-          '<td class="right num"><b>' + money(s.total) + '</b></td>' +
-          '<td class="right nowrap">' +
-            '<button class="btn sm" data-print="' + esc(s.id) + '" title="Imprimir cupom">' + icon('print', 12) + '</button> ' +
-            (s.status === 'Estornada' ? '' : '<button class="btn sm danger" data-void="' + esc(s.id) + '" title="Estornar">' + icon('refresh', 12) + '</button>') +
-          '</td></tr>';
-      }).join('') + '</tbody></table></div>';
+        return el('tr', { class: 'clickable', 'data-sale': s.id }, [
+          el('td', null, ['#' + s.id, s.status === 'Estornada' ? el('span', { class: 'badge red' }, 'ESTORNADA') : null]),
+          el('td', { class: 'nowrap' }, UI.dt(s.date)),
+          el('td', null, s.operator),
+          el('td', null, s.customerName || el('span', { class: 'muted' }, '—')),
+          el('td', { class: 'num' }, String(s.items.length)),
+          el('td', null, s.payments.reduce(function (acc, p, i) {
+            if (i) acc.push(' ');
+            acc.push(el('span', { class: 'badge' }, p.method));
+            return acc;
+          }, [])),
+          el('td', { class: 'right num' }, el('b', null, money(s.total))),
+          el('td', { class: 'right nowrap' }, [
+            el('button', { class: 'btn sm', 'data-print': s.id, title: 'Imprimir cupom' }, iconEl('print', 12)), ' ',
+            s.status === 'Estornada' ? null : el('button', { class: 'btn sm danger', 'data-void': s.id, title: 'Estornar' }, iconEl('refresh', 12))
+          ])
+        ]);
+      })
+    );
   }
 
   function saleDetail(id) {
@@ -606,66 +725,96 @@
       if (f.status === 'off' && p.active) return false;
       if (f.q) {
         var q = f.q.toLowerCase();
-        if ((p.name + ' ' + p.category + ' ' + (p.code || '') + ' ' + (p.barcode || '') + ' ' + (p.supplier || '')).toLowerCase().indexOf(q) === -1) return false;
+        if ((p.name + ' ' + p.category + ' ' + (p.code || '') + ' ' + (p.barcode || '') + ' ' + (p.supplier || '') + ' ' + (p.stockArea || '') + ' ' + (p.depositAisle || '') + ' ' + (p.depositShelf || '') + ' ' + (p.depositHeight || '') + ' ' + (p.salesAisle || '') + ' ' + (p.salesShelf || '') + ' ' + (p.salesHeight || '')).toLowerCase().indexOf(q) === -1) return false;
       }
       return true;
     });
     var val = UI.round2(list.reduce(function (a, p) { return a + p.stock * p.cost; }, 0));
 
-    return '<div class="page-head"><div><h1>Produtos e estoque</h1><p>Cadastro completo, custo, margem, validade e mínimos.</p></div>' +
-      '<div class="actions">' +
-        '<button class="btn" onclick="App.printLabels()">' + icon('tag', 14) + ' Etiquetas</button>' +
-        '<button class="btn" onclick="App.importProducts()">' + icon('up', 14) + ' Importar CSV</button>' +
-        '<button class="btn primary" onclick="App.editProduct()">' + icon('plus', 14) + ' Novo produto</button>' +
-      '</div></div>' +
+    var toolbar = el('div', { class: 'toolbar' }, [
+      el('div', { class: 'search-wrap' }, [iconEl('search', 15),
+        el('input', { class: 'field', id: 'prodQ', placeholder: 'Buscar por nome, código, categoria ou fornecedor', value: f.q })]),
+      el('select', { class: 'field', style: { width: 'auto' }, id: 'prodCat' },
+        [el('option', { value: 'all' }, 'Todas as categorias')].concat(db.categories.map(function (c) {
+          var o = el('option', { value: c.id }, (c.emoji || '') + ' ' + c.name);
+          if (f.cat === c.id) o.setAttribute('selected', '');
+          return o;
+        }))),
+      el('select', { class: 'field', style: { width: 'auto' }, id: 'prodStatus' },
+        [['all', 'Todos'], ['low', 'Estoque baixo'], ['out', 'Zerados'], ['exp', 'Vencendo/vencido'], ['off', 'Inativos']].map(function (o) {
+          var op = el('option', { value: o[0] }, o[1]);
+          if (f.status === o[0]) op.setAttribute('selected', '');
+          return op;
+        }))
+    ]);
 
-      '<div class="grid kpis">' +
-        kpi('Produtos cadastrados', String(db.products.length), db.products.filter(function (p) { return p.active; }).length + ' ativos', 'accent') +
-        kpi('Valor em estoque', money(val), 'ao custo', 'blue') +
-        kpi('Valor de venda', money(UI.round2(list.reduce(function (a, p) { return a + p.stock * p.price; }, 0))), 'potencial bruto', 'teal') +
-        kpi('Margem média', UI.pct(db.products.length ? db.products.reduce(function (a, p) { return a + Store.marginOf(p); }, 0) / db.products.length : 0), 'sobre custo', 'amber') +
-        kpi('Alertas', String(db.products.filter(function (p) { return p.active && p.stock <= p.min; }).length), 'estoque baixo', 'red') +
-      '</div>' +
+    return frag(
+      pageHead('Produtos e estoque', 'Cadastro completo, custo, margem, validade e mínimos.', [
+        btn('Etiquetas', 'tag', 'btn', function () { printLabels(); }),
+        btn('Importar CSV', 'up', 'btn', function () { importProducts(); }),
+        btn('Novo produto', 'plus', 'btn primary', function () { editProduct(); })
+      ]),
 
-      card('Catálogo', '<div class="toolbar">' +
-        '<div class="search-wrap">' + icon('search', 15) + '<input class="field" id="prodQ" placeholder="Buscar por nome, código, categoria ou fornecedor" value="' + esc(f.q) + '"></div>' +
-        '<select class="field" style="width:auto" id="prodCat"><option value="all">Todas as categorias</option>' +
-          db.categories.map(function (c) { return '<option value="' + esc(c.id) + '"' + (f.cat === c.id ? ' selected' : '') + '>' + esc(c.emoji) + ' ' + esc(c.name) + '</option>'; }).join('') + '</select>' +
-        '<select class="field" style="width:auto" id="prodStatus">' +
-        [['all', 'Todos'], ['low', 'Estoque baixo'], ['out', 'Zerados'], ['exp', 'Vencendo/vencido'], ['off', 'Inativos']]
-          .map(function (o) { return '<option value="' + o[0] + '"' + (f.status === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') +
-        '</select></div>' + productTable(list), '', 'box');
+      el('div', { class: 'grid kpis' }, [
+        kpiEl('Produtos cadastrados', String(db.products.length), db.products.filter(function (p) { return p.active; }).length + ' ativos', 'accent'),
+        kpiEl('Valor em estoque', money(val), 'ao custo', 'blue'),
+        kpiEl('Valor de venda', money(UI.round2(list.reduce(function (a, p) { return a + p.stock * p.price; }, 0))), 'potencial bruto', 'teal'),
+        kpiEl('Margem média', UI.pct(db.products.length ? db.products.reduce(function (a, p) { return a + Store.marginOf(p); }, 0) / db.products.length : 0), 'sobre custo', 'amber'),
+        kpiEl('Alertas', String(db.products.filter(function (p) { return p.active && p.stock <= p.min; }).length), 'estoque baixo', 'red')
+      ]),
+
+      cardEl('Catálogo', frag(toolbar, productTable(list)), '', 'box')
+    );
   };
 
   function productTable(list) {
-    if (!list.length) return empty('Nenhum produto', 'Ajuste a busca ou cadastre um produto novo.', 'box');
-    return '<div class="table-wrap"><table><thead><tr><th>Produto</th><th>Categoria</th><th>Validade</th><th class="right">Custo</th><th class="right">Venda</th><th class="right">Margem</th><th>Estoque</th><th class="right">Valor</th><th></th></tr></thead><tbody>' +
+    if (!list.length) return emptyEl('Nenhum produto', 'Ajuste a busca ou cadastre um produto novo.', 'box');
+    return tabela(
+      ['Produto / EAN', 'Categoria', 'Validade', { label: 'Custo', right: true }, { label: 'Venda', right: true }, { label: 'Margem', right: true }, 'Estoque', 'Endereco', { label: 'Valor', right: true }, ''],
       list.map(function (p) {
         var cat = Store.categoryOf(p.category);
         var dExp = p.expiry ? UI.daysBetween(UI.today(), p.expiry) : null;
-        var expBadge = !p.expiry ? '<span class="muted tiny">—</span>'
-          : dExp < 0 ? '<span class="badge red">VENCIDO</span>'
-          : dExp <= 7 ? '<span class="badge red">' + dExp + 'd</span>'
-          : dExp <= 30 ? '<span class="badge amber">' + dExp + 'd</span>'
-          : '<span class="badge green">' + UI.dateOnly(p.expiry) + '</span>';
-        return '<tr data-prod="' + esc(p.id) + '" class="clickable' + (p.active ? '' : ' opacity:0.5') + '">' +
-          '<td><b>' + esc(p.emoji) + ' ' + esc(p.name) + '</b><br><span class="tiny muted">' + esc(p.code || p.barcode || '') + '</span></td>' +
-          '<td><span class="badge" style="border-color:' + esc(cat.color) + '55">' + esc(cat.emoji) + ' ' + esc(cat.name) + '</span></td>' +
-          '<td>' + expBadge + '</td>' +
-          '<td class="right num">' + money(p.cost) + '</td>' +
-          '<td class="right num"><b>' + money(p.price) + '</b></td>' +
-          '<td class="right num"><span class="badge ' + (Store.marginOf(p) >= 40 ? 'green' : Store.marginOf(p) >= 20 ? 'amber' : 'red') + '">' + UI.pct(Store.marginOf(p)) + '</span></td>' +
-          '<td><span class="badge ' + (p.stock <= 0 ? 'red' : p.stock <= p.min ? 'amber' : 'green') + '">' + p.stock + '</span> <span class="tiny muted">mín ' + p.min + '</span></td>' +
-          '<td class="right num">' + money(UI.round2(p.stock * p.cost)) + '</td>' +
-          '<td class="right nowrap"><button class="btn sm" data-edit="' + esc(p.id) + '">' + icon('edit', 12) + '</button> ' +
-          '<button class="btn sm" data-stock="' + esc(p.id) + '" title="Movimentar estoque">' + icon('layers', 12) + '</button></td></tr>';
-      }).join('') + '</tbody></table></div>';
+        var expBadge = !p.expiry ? el('span', { class: 'muted tiny' }, '—')
+          : dExp < 0 ? el('span', { class: 'badge red' }, 'VENCIDO')
+          : dExp <= 7 ? el('span', { class: 'badge red' }, dExp + 'd')
+          : dExp <= 30 ? el('span', { class: 'badge amber' }, dExp + 'd')
+          : el('span', { class: 'badge green' }, UI.dateOnly(p.expiry));
+        var marg = Store.marginOf(p);
+        return el('tr', { class: 'clickable', 'data-prod': p.id, style: p.active ? null : { opacity: '.5' } }, [
+          el('td', null, [el('b', null, (p.emoji || '') + ' ' + p.name), el('br'), el('span', { class: 'tiny muted' }, p.barcode ? 'EAN ' + p.barcode : 'SKU ' + (p.code || ''))]),
+          el('td', null, el('span', { class: 'badge', style: { 'border-color': cat.color + '55' } }, (cat.emoji || '') + ' ' + cat.name)),
+          el('td', null, expBadge),
+          el('td', { class: 'right num' }, money(p.cost)),
+          el('td', { class: 'right num' }, (function () {
+            if (!Store.promoVigente(p)) return el('b', null, money(p.price));
+            return el('span', null, [
+              el('b', { style: { color: 'var(--accent-3)' } }, money(p.promoPrice)),
+              el('br'),
+              el('span', { class: 'tiny muted', style: { 'text-decoration': 'line-through' } }, money(p.price))
+            ]);
+          })()),
+          el('td', { class: 'right num' }, el('span', { class: 'badge ' + (marg >= 40 ? 'green' : marg >= 20 ? 'amber' : 'red') }, UI.pct(marg))),
+          el('td', null, [el('span', { class: 'badge ' + (p.stock <= 0 ? 'red' : p.stock <= p.min ? 'amber' : 'green') }, String(p.stock)), ' ', el('span', { class: 'tiny muted' }, 'mín ' + p.min)]),
+          el('td', null, [
+            el('span', { class: 'badge amber' }, 'Deposito: ' + (p.stockDeposit == null ? (p.stockArea === 'venda' ? 0 : p.stock) : p.stockDeposit)),
+            el('br'), el('span', { class: 'tiny muted' }, [(p.depositAisle || 'Rua N/D'), ' | ', (p.depositShelf || 'Prateleira N/D'), ' | ', (p.depositHeight || 'Nivel N/D')]),
+            el('br'), el('span', { class: 'badge green' }, 'Area de venda: ' + (p.stockSales == null ? (p.stockArea === 'venda' ? p.stock : 0) : p.stockSales)),
+            el('br'), el('span', { class: 'tiny muted' }, [(p.salesAisle || 'Rua N/D'), ' | ', (p.salesShelf || 'Prateleira N/D'), ' | ', (p.salesHeight || 'Nivel N/D')])
+          ]),
+          el('td', { class: 'right num' }, money(UI.round2(p.stock * p.cost))),
+          el('td', { class: 'right nowrap' }, [
+            el('button', { class: 'btn sm', 'data-edit': p.id }, iconEl('edit', 12)), ' ',
+            el('button', { class: 'btn sm', 'data-stock': p.id, title: 'Movimentar estoque' }, iconEl('layers', 12))
+          ])
+        ]);
+      })
+    );
   }
 
   function editProduct(id) {
     var db = Store.db;
     var p = id ? db.products.find(function (x) { return x.id === id; }) : null;
-    var v = p || { name: '', code: '', barcode: '', category: 'mercearia', cost: '', price: '', stock: 0, min: 3, unit: 'un', emoji: '📦', supplier: '', ncm: '', cfop: '5102', csosn: '102', expiry: '', lot: '', active: true };
+    var v = p || { name: '', code: '', barcode: '', category: 'mercearia', cost: '', price: '', stock: 0, min: 3, unit: 'un', emoji: '📦', supplier: '', ncm: '', cfop: '5102', csosn: '102', expiry: '', lot: '', active: true, promoPrice: '', promoFrom: '', promoTo: '' };
     UI.modal({
       title: id ? 'Editar produto' : 'Novo produto', icon: 'box', size: 'lg',
       tabs: [
@@ -678,7 +827,8 @@
         '<div class="mpane active" data-pane="basico"><div class="form-grid">' +
           UI.field('Nome do produto *', 'name', v.name, { full: true, placeholder: 'Ex.: Arroz Tipo 1 5kg' }) +
           UI.field('Código interno / SKU', 'code', v.code, { placeholder: 'AUTO' }) +
-          UI.field('Código de barras (EAN)', 'barcode', v.barcode, { placeholder: '789...' }) +
+          UI.field('Código de barras (EAN)', 'barcode', v.barcode, { full: true, placeholder: 'digite ou use o leitor' }) +
+          '<div class=\"full row\"><button type=\"button\" class=\"btn sm\" data-focusbarcode>Focar leitor</button><span class=\"tiny muted\">Clique aqui e passe o produto no leitor.</span></div>' +
           UI.field('Categoria', 'category', v.category, { type: 'select', options: db.categories.map(function (c) { return { value: c.id, label: c.emoji + ' ' + c.name }; }) }) +
           UI.field('Emoji / imagem', 'emoji', v.emoji, { placeholder: '🍚' }) +
           UI.field('Fornecedor', 'supplier', v.supplier, { placeholder: 'Nome do fornecedor' }) +
@@ -694,6 +844,12 @@
           UI.field('Preço de venda (R$)', 'price', v.price, { type: 'money', step: '0.01', min: 0 }) +
           UI.field('Margem (%)', 'marginOut', UI.pct(Store.marginOf(v)), { hint: 'calculada' }) +
         '</div>' +
+        '<div class="form-grid three mt-2">' +
+          UI.field('Preço promocional (R$)', 'promoPrice', v.promoPrice, { type: 'money', step: '0.01', min: 0, hint: '0 = sem promoção' }) +
+          UI.field('Promoção a partir de', 'promoFrom', v.promoFrom, { type: 'date' }) +
+          UI.field('Promoção até', 'promoTo', v.promoTo, { type: 'date' }) +
+        '</div>' +
+        '<div class="modal-note">Preço promocional com data de início e fim. Sem datas, vale até ser removido; o caixa aplica o promocional automaticamente enquanto estiver vigente.</div>' +
         '<div class="modal-note" id="marginNote">A margem é calculada sobre o custo: <b>(venda − custo) ÷ custo</b>. O preço mínimo do configurador é apenas referência.</div></div>' +
 
         '<div class="mpane" data-pane="fiscal"><div class="form-grid">' +
@@ -706,18 +862,39 @@
             { value: '300', label: '300 — Imune' }, { value: '400', label: '400 — Não tributada' },
             { value: '500', label: '500 — ST cobrado anteriormente' }] }) +
           UI.field('CEST (opcional)', 'cest', v.cest || '', { placeholder: '28.0100' }) +
+          UI.field('CST ICMS (regime normal)', 'cst', v.cst || '', { placeholder: 'Preencher conforme contador' }) +
+          UI.field('CST PIS', 'pisCst', v.pisCst || '', { placeholder: 'Preencher conforme contador' }) +
+          UI.field('CST COFINS', 'cofinsCst', v.cofinsCst || '', { placeholder: 'Preencher conforme contador' }) +
+          UI.field('Origem da mercadoria', 'origin', v.origin || '0', { type: 'select', options: [
+            { value: '0', label: '0 - Nacional' }, { value: '1', label: '1 - Estrangeira (importacao direta)' },
+            { value: '2', label: '2 - Estrangeira (adquirida no mercado interno)' }, { value: '3', label: '3 - Nacional com conteudo de importacao acima de 40%' },
+            { value: '4', label: '4 - Nacional conforme processo produtivo basico' }, { value: '5', label: '5 - Nacional com conteudo de importacao ate 40%' },
+            { value: '6', label: '6 - Estrangeira (importacao direta, sem similar nacional)' }, { value: '7', label: '7 - Estrangeira (mercado interno, sem similar nacional)' },
+            { value: '8', label: '8 - Nacional com conteudo de importacao acima de 70%' }] }) +
         '</div>' +
         '<div class="modal-note warn">' + icon('alert', 12) + ' Este sistema <b>não emite NFC-e</b>. Ele prepara os campos fiscais e gera o comprovante de venda auxiliar. Para emitir nota fiscal é necessário um servidor com certificado digital e comunicação com a SEFAZ.</div></div>' +
 
         '<div class="mpane" data-pane="estoque"><div class="form-grid three">' +
-          UI.field('Estoque atual', 'stock', v.stock, { type: 'money', step: '0.001' }) +
+          UI.field('No deposito', 'stockDeposit', v.stockDeposit == null ? (v.stockArea === 'venda' ? 0 : v.stock) : v.stockDeposit, { type: 'number', step: '0.001', min: 0 }) +
+          UI.field('Na area de venda', 'stockSales', v.stockSales == null ? (v.stockArea === 'venda' ? v.stock : 0) : v.stockSales, { type: 'number', step: '0.001', min: 0 }) +
           UI.field('Estoque mínimo', 'min', v.min, { type: 'number', step: '1' }) +
           UI.field('Validade', 'expiry', v.expiry, { type: 'date' }) +
           UI.field('Lote', 'lot', v.lot, { placeholder: 'L2026001' }) +
+          UI.field('Rua do deposito', 'depositAisle', v.depositAisle || '', { placeholder: 'Ex.: Rua A' }) +
+          UI.field('Prateleira do deposito', 'depositShelf', v.depositShelf || '', { placeholder: 'Ex.: Prateleira 3' }) +
+          UI.field('Altura no deposito', 'depositHeight', v.depositHeight || '', { placeholder: 'Ex.: nivel 2' }) +
+          UI.field('Rua da area de venda', 'salesAisle', v.salesAisle || '', { placeholder: 'Ex.: Corredor 2' }) +
+          UI.field('Prateleira na area de venda', 'salesShelf', v.salesShelf || '', { placeholder: 'Ex.: Gondola 4' }) +
+          UI.field('Altura na area de venda', 'salesHeight', v.salesHeight || '', { placeholder: 'Ex.: nivel 2' }) +
         '</div>' + UI.checkbox('Produto ativo (aparece no caixa)', 'active', v.active) + '</div>',
       confirmText: id ? 'Salvar alterações' : 'Cadastrar produto',
       onMount: function (root) {
         var cost = root.querySelector('[name=cost]'), price = root.querySelector('[name=price]'), out = root.querySelector('[name=marginOut]');
+        var barcode = root.querySelector('[name=barcode]'), focusBarcode = root.querySelector('[data-focusbarcode]');
+        if (focusBarcode && barcode) focusBarcode.addEventListener('click', function () { barcode.focus(); barcode.select(); });
+        if (barcode) barcode.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') { e.preventDefault(); barcode.value = barcode.value.trim(); UI.toast('Codigo lido. Complete os dados e cadastre o produto.', 'ok'); }
+        });
         var upd = function () {
           var c = UI.parseNum(cost.value), p = UI.parseNum(price.value);
           out.value = c > 0 ? UI.pct(((p - c) / c) * 100) : '—';
@@ -728,6 +905,9 @@
         var d = UI.formData(root);
         if (!d.name || !d.name.trim()) { UI.toast('Informe o nome do produto.', 'err'); return false; }
         if (!(Number(d.price) > 0)) { UI.toast('Informe o preço de venda.', 'err'); return false; }
+        if (d.promoFrom && d.promoTo && d.promoFrom > d.promoTo) {
+          UI.toast('A data final da promoção deve ser depois da inicial.', 'err'); return false;
+        }
         var target = id ? db.products.find(function (x) { return x.id === id; }) : null;
         var dup = db.products.find(function (x) {
           return x.id !== id && d.barcode && x.barcode === String(d.barcode).trim();
@@ -736,12 +916,17 @@
 
         var rec = {
           id: id || Store.uid('p'),
-          name: d.name.trim(), code: d.code || '', barcode: d.barcode || '',
+          name: d.name.trim(), code: String(d.code || '').trim(), barcode: String(d.barcode || '').trim(),
           category: d.category, emoji: d.emoji || '📦', supplier: d.supplier || '',
           unit: d.unit || 'un',
           cost: UI.round2(UI.parseNum(d.cost)), price: UI.round2(UI.parseNum(d.price)),
-          stock: Number(d.stock) || 0, min: Number(d.min) || 0,
-          ncm: d.ncm || '', cfop: d.cfop || '5102', csosn: d.csosn || '102', cest: d.cest || '',
+          promoPrice: UI.round2(UI.parseNum(d.promoPrice)), promoFrom: d.promoFrom || '', promoTo: d.promoTo || '',
+          stockDeposit: Math.max(0, Number(d.stockDeposit) || 0), stockSales: Math.max(0, Number(d.stockSales) || 0),
+          stock: Math.round(((Number(d.stockDeposit) || 0) + (Number(d.stockSales) || 0)) * 1000) / 1000, min: Number(d.min) || 0,
+          stockArea: 'deposito',
+          depositAisle: String(d.depositAisle || '').trim(), depositShelf: String(d.depositShelf || '').trim(), depositHeight: String(d.depositHeight || '').trim(),
+          salesAisle: String(d.salesAisle || '').trim(), salesShelf: String(d.salesShelf || '').trim(), salesHeight: String(d.salesHeight || '').trim(),
+          ncm: d.ncm || '', cfop: d.cfop || '5102', csosn: d.csosn || '102', cest: d.cest || '', origin: d.origin || '0', cst: d.cst || '', pisCst: d.pisCst || '', cofinsCst: d.cofinsCst || '',
           expiry: d.expiry || '', lot: d.lot || '', active: !!d.active,
           createdAt: target ? target.createdAt : new Date().toISOString()
         };
@@ -762,47 +947,62 @@
     var db = Store.db;
     var p = db.products.find(function (x) { return x.id === id; });
     if (!p) return;
+    if (p.stockDeposit == null) p.stockDeposit = p.stockArea === 'venda' ? 0 : p.stock;
+    if (p.stockSales == null) p.stockSales = p.stockArea === 'venda' ? p.stock : 0;
     UI.modal({
       title: 'Estoque — ' + p.name, icon: 'layers', size: 'sm',
       body: '<div class="grid kpis mb-2">' +
-          kpi('Atual', String(p.stock), 'em estoque', 'accent') +
-          kpi('Mínimo', String(p.min), 'nível de alerta') +
-          kpi('Valor', money(UI.round2(p.stock * p.cost)), 'ao custo', 'blue') +
+          kpi('Total', String(p.stock), 'unidades', 'accent') +
+          kpi('Depósito', String(p.stockDeposit), 'unidades', 'amber') +
+          kpi('Área de venda', String(p.stockSales), 'unidades', 'green') +
         '</div>' +
         '<div class="form-grid">' +
-          UI.field('Tipo de movimento', 'type', 'entrada', { type: 'select', options: [
-            { value: 'entrada', label: 'Entrada (compra, devolução)' },
-            { value: 'saida', label: 'Saída (perda, consumo, ajuste)' }] }) +
-          UI.field('Quantidade', 'qty', '', { type: 'money', step: '0.001', min: 0 }) +
-          UI.field('Motivo', 'reason', '', { full: true, placeholder: 'Ex.: compra NF 1234' }) +
+          UI.field('Movimento', 'type', 'entrada', { type: 'select', options: [
+            { value: 'entrada', label: 'Entrada de estoque' }, { value: 'saida', label: 'Saída / perda' },
+            { value: 'transferencia', label: 'Transferir entre locais' }] }) +
+          UI.field('Quantidade', 'qty', '', { type: 'number', step: '0.001', min: 0 }) +
+          UI.field('Origem / destino', 'location', 'deposito', { type: 'select', options: [
+            { value: 'deposito', label: 'Depósito' }, { value: 'venda', label: 'Área de venda' }] }) +
+          UI.field('Motivo', 'reason', '', { full: true, placeholder: 'Ex.: reposição da prateleira' }) +
         '</div>' +
-        '<div class="modal-note">Novo estoque: <b id="stockPreview">' + p.stock + '</b> ' + esc(p.unit) + '</div>',
+        '<div class="modal-note">Total depois do movimento: <b id="stockPreview">' + p.stock + '</b> ' + esc(p.unit) + '</div>',
       confirmText: 'Registrar',
       onMount: function (root) {
-        var t = root.querySelector('[name=type]'), q = root.querySelector('[name=qty]'), prev = root.querySelector('#stockPreview');
+        var t = root.querySelector('[name=type]'), q = root.querySelector('[name=qty]'), loc = root.querySelector('[name=location]');
+        var preview = root.querySelector('#stockPreview');
         var upd = function () {
           var n = Number(q.value) || 0;
-          prev.textContent = UI.round2(t.value === 'entrada' ? p.stock + n : p.stock - n);
+          preview.textContent = UI.round2(t.value === 'transferencia' ? p.stock : p.stock + (t.value === 'entrada' ? n : -n));
         };
-        t.addEventListener('change', upd); q.addEventListener('input', upd);
+        t.addEventListener('change', upd); q.addEventListener('input', upd); loc.addEventListener('change', upd);
       },
       onConfirm: function (root) {
-        var d = UI.formData(root);
-        var q = Number(d.qty) || 0;
-        if (q <= 0) { UI.toast('Informe a quantidade.', 'err'); return false; }
+        var d = UI.formData(root), qty = Math.round((Number(d.qty) || 0) * 1000) / 1000;
+        if (qty <= 0) { UI.toast('Informe uma quantidade válida.', 'err'); return false; }
         if (!d.reason || !d.reason.trim()) { UI.toast('Informe o motivo.', 'err'); return false; }
-        var delta = d.type === 'entrada' ? q : -q;
-        p.stock = Math.round((p.stock + delta) * 1000) / 1000;
-        db.entries.unshift({
-          id: String(Store.nextId('entry')), date: new Date().toISOString(),
-          type: delta > 0 ? 'Entrada' : 'Saída',
-          category: delta > 0 ? 'Entrada de estoque' : 'Ajuste de estoque',
-          description: p.name + ' · ' + d.reason,
-          amount: UI.round2(Math.abs(delta) * p.cost), method: 'Estoque', productId: p.id, settled: true
-        });
-        Store.save();
-        rerender();
-        UI.toast('Estoque de "' + p.name + '" agora é ' + p.stock + '.', 'ok');
+        var area = d.location === 'venda' ? 'stockSales' : 'stockDeposit';
+        var origem = d.location === 'venda' ? 'stockSales' : 'stockDeposit';
+        var destino = d.location === 'venda' ? 'stockDeposit' : 'stockSales';
+        if (d.type === 'transferencia') {
+          if (Number(p[origem]) < qty) { UI.toast('Quantidade insuficiente no local de origem.', 'err'); return false; }
+          p[origem] = Math.round((Number(p[origem]) - qty) * 1000) / 1000;
+          p[destino] = Math.round((Number(p[destino]) + qty) * 1000) / 1000;
+        } else if (d.type === 'entrada') p[area] = Math.round((Number(p[area]) + qty) * 1000) / 1000;
+        else {
+          if (Number(p[area]) < qty) { UI.toast('Quantidade insuficiente neste local.', 'err'); return false; }
+          p[area] = Math.round((Number(p[area]) - qty) * 1000) / 1000;
+        }
+        p.stock = Math.round((Number(p.stockDeposit) + Number(p.stockSales)) * 1000) / 1000;
+        var delta = d.type === 'entrada' ? qty : (d.type === 'saida' ? -qty : 0);
+        var movimento = { id: String(Store.nextId('entry')), date: new Date().toISOString(),
+          type: delta > 0 ? 'Entrada' : (delta < 0 ? 'Saída' : 'Transferência'),
+          category: d.type === 'transferencia' ? 'Transferência de estoque' : (delta > 0 ? 'Entrada de estoque' : 'Ajuste de estoque'),
+          description: p.name + ' · ' + (d.type === 'transferencia' ? (d.location === 'venda' ? 'área de venda → depósito' : 'depósito → área de venda') : d.reason),
+          amount: UI.round2(Math.abs(delta) * p.cost), method: 'Estoque', productId: p.id,
+          quantity: qty, location: d.location, reason: d.reason.trim(), settled: true };
+        db.entries.unshift(movimento);
+        Store.save(); Store.marcarCadastro('products', p); Store.marcarCadastro('entries', movimento);
+        rerender(); UI.toast('Estoque atualizado: depósito ' + p.stockDeposit + ' · área de venda ' + p.stockSales + '.', 'ok');
       }
     });
   }
@@ -815,69 +1015,105 @@
 
     if (f.tab === 'list') {
       var list = db.purchases || [];
-      body = card('Compras registradas', list.length ?
-        '<div class="table-wrap"><table><thead><tr><th>Compra</th><th>Data</th><th>Fornecedor</th><th class="right">Itens</th><th class="right">Total</th><th>Pagamento</th><th></th></tr></thead><tbody>' +
+      body = cardEl('Compras registradas', list.length ? tabela(
+        ['Compra', 'Data', 'Fornecedor', { label: 'Itens', right: true }, { label: 'Total', right: true }, 'Pagamento', ''],
         list.map(function (pc) {
-          return '<tr><td><b>#' + esc(pc.id) + '</b></td><td class="nowrap">' + UI.dt(pc.date) + '</td>' +
-            '<td>' + esc(pc.supplierName || '—') + '</td>' +
-            '<td class="right num">' + pc.items.length + '</td>' +
-            '<td class="right num"><b>' + money(pc.total) + '</b></td>' +
-            '<td><span class="badge ' + (pc.paid ? 'green' : 'amber') + '">' + (pc.paid ? 'Pago' : 'A pagar') + '</span></td>' +
-            '<td class="right"><button class="btn sm" data-viewpc="' + esc(pc.id) + '">Detalhes</button></td></tr>';
-        }).join('') + '</tbody></table></div>'
-        : empty('Nenhuma compra registrada', 'Monte uma compra para dar entrada no estoque.', 'truck'),
-        '<button class="btn primary sm" data-newpc>' + icon('plus', 13) + ' Nova compra</button>', 'truck');
+          return el('tr', null, [
+            el('td', null, el('b', null, '#' + pc.id)),
+            el('td', { class: 'nowrap' }, UI.dt(pc.date)),
+            el('td', null, pc.supplierName || '—'),
+            el('td', { class: 'right num' }, String(pc.items.length)),
+            el('td', { class: 'right num' }, el('b', null, money(pc.total))),
+            el('td', null, el('span', { class: 'badge ' + (pc.paid ? 'green' : 'amber') }, pc.paid ? 'Pago' : 'A pagar')),
+            el('td', { class: 'right' }, el('button', { class: 'btn sm', 'data-viewpc': pc.id }, 'Detalhes'))
+          ]);
+        })
+      ) : emptyEl('Nenhuma compra registrada', 'Monte uma compra para dar entrada no estoque.', 'truck'),
+        el('button', { class: 'btn primary sm', 'data-newpc': '' }, [iconEl('plus', 13), ' Nova compra']), 'truck');
     } else if (f.tab === 'suppliers') {
       var sup = db.suppliers || [];
-      body = card('Fornecedores', sup.length ?
-        '<div class="table-wrap"><table><thead><tr><th>Fornecedor</th><th>Contato</th><th>Produtos</th><th class="right">Compras</th><th></th></tr></thead><tbody>' +
+      body = cardEl('Fornecedores', sup.length ? tabela(
+        ['Fornecedor', 'Contato', 'Produtos', { label: 'Compras', right: true }, ''],
         sup.map(function (s) {
           var prods = db.products.filter(function (p) { return p.supplier === s.name; });
           var pc = db.purchases.filter(function (x) { return x.supplierId === s.id; });
-          return '<tr><td><b>' + esc(s.name) + '</b>' + (s.cnpj ? '<br><span class="tiny muted">' + esc(s.cnpj) + '</span>' : '') + '</td>' +
-            '<td>' + (s.phone ? esc(s.phone) : '—') + '</td>' +
-            '<td class="num">' + prods.length + '</td>' +
-            '<td class="right num">' + money(UI.round2(pc.reduce(function (a, x) { return a + x.total; }, 0))) + '</td>' +
-            '<td class="right"><button class="btn sm" data-editsup="' + esc(s.id) + '">Editar</button></td></tr>';
-        }).join('') + '</tbody></table></div>'
-        : empty('Nenhum fornecedor', 'Cadastre os fornecedores para vincular aos produtos.', 'truck'),
-        '<button class="btn primary sm" data-newsup>' + icon('plus', 13) + ' Novo fornecedor</button>', 'truck');
+          return el('tr', null, [
+            el('td', null, [
+              el('b', null, s.name),
+              s.cnpj ? el('span', null, [el('br'), el('span', { class: 'tiny muted' }, s.cnpj)]) : null
+            ]),
+            el('td', null, s.phone || '—'),
+            el('td', { class: 'num' }, String(prods.length)),
+            el('td', { class: 'right num' }, money(UI.round2(pc.reduce(function (a, x) { return a + x.total; }, 0)))),
+            el('td', { class: 'right nowrap' }, [
+              el('button', { class: 'btn sm', 'data-newpc-supplier': s.id }, 'Nova compra'), ' ',
+              el('button', { class: 'btn sm', 'data-editsup': s.id }, 'Editar')
+            ])
+          ]);
+        })
+      ) : emptyEl('Nenhum fornecedor', 'Cadastre os fornecedores para vincular aos produtos.', 'truck'),
+        el('button', { class: 'btn primary sm', 'data-newsup': '' }, [iconEl('plus', 13), ' Novo fornecedor']), 'truck');
     } else {
       var sug = db.products.filter(function (p) { return p.active && p.stock <= p.min * 1.5; })
         .map(function (p) { return { p: p, sug: Math.max(1, (p.min * 3) - p.stock) }; })
         .sort(function (a, b) { return b.sug * b.p.cost - a.sug * a.p.cost; });
       var totalSug = UI.round2(sug.reduce(function (a, s) { return a + s.sug * s.p.cost; }, 0));
-      body = card('Lista de reposição sugerida', sug.length ?
-        '<div class="table-wrap"><table><thead><tr><th>Produto</th><th>Estoque</th><th>Mínimo</th><th class="right">Sugerir</th><th class="right">Custo</th><th class="right">Total</th><th></th></tr></thead><tbody>' +
-        sug.map(function (s) {
-          return '<tr><td><b>' + s.p.emoji + ' ' + esc(s.p.name) + '</b><br><span class="tiny muted">' + esc(s.p.supplier || 'sem fornecedor') + '</span></td>' +
-            '<td><span class="badge ' + (s.p.stock <= 0 ? 'red' : 'amber') + '">' + s.p.stock + '</span></td>' +
-            '<td>' + s.p.min + '</td>' +
-            '<td class="right num"><b>' + s.sug + '</b> ' + esc(s.p.unit) + '</td>' +
-            '<td class="right num">' + money(s.p.cost) + '</td>' +
-            '<td class="right num"><b>' + money(UI.round2(s.sug * s.p.cost)) + '</b></td>' +
-            '<td class="right"><label class="check"><input type="checkbox" class="pc-pick" value="' + esc(s.p.id) + '" data-sug="' + s.sug + '" data-cost="' + s.p.cost + '"></label></td></tr>';
-        }).join('') + '</tbody><tfoot><tr><td colspan="5">Total sugerido</td><td class="right num">' + money(totalSug) + '</td><td></td></tr></tfoot></table></div>' +
-        '<div class="row mt-2"><button class="btn primary" data-makeorder>' + icon('cart', 14) + ' Montar compra com selecionados</button>' +
-        '<button class="btn" data-selectall>Selecionar todos</button></div>'
-        : empty('Estoque em dia', 'Nenhuma reposição sugerida no momento.', 'check'),
+      body = cardEl('Lista de reposição sugerida', sug.length ? frag(
+        tabela(
+          ['Produto', 'Estoque', 'Mínimo', { label: 'Sugerir', right: true }, { label: 'Custo', right: true }, { label: 'Total', right: true }, ''],
+          sug.map(function (s) {
+            return el('tr', null, [
+              el('td', null, [el('b', null, (s.p.emoji || '') + ' ' + s.p.name), el('br'), el('span', { class: 'tiny muted' }, s.p.supplier || 'sem fornecedor')]),
+              el('td', null, el('span', { class: 'badge ' + (s.p.stock <= 0 ? 'red' : 'amber') }, String(s.p.stock))),
+              el('td', null, String(s.p.min)),
+              el('td', { class: 'right num' }, [el('b', null, String(s.sug)), ' ' + (s.p.unit || '')]),
+              el('td', { class: 'right num' }, money(s.p.cost)),
+              el('td', { class: 'right num' }, el('b', null, money(UI.round2(s.sug * s.p.cost)))),
+              el('td', { class: 'right' }, el('label', { class: 'check' }, el('input', { type: 'checkbox', class: 'pc-pick', value: s.p.id, 'data-sug': String(s.sug), 'data-cost': s.p.cost })))
+            ]);
+          }),
+          el('tfoot', null, el('tr', null, [
+            el('td', { colspan: 5 }, 'Total sugerido'),
+            el('td', { class: 'right num' }, money(totalSug)),
+            el('td')
+          ]))
+        ),
+        el('div', { class: 'row mt-2' }, [
+          el('button', { class: 'btn primary', 'data-makeorder': '' }, [iconEl('cart', 14), ' Montar compra com selecionados']),
+          el('button', { class: 'btn', 'data-selectall': '' }, 'Selecionar todos')
+        ])
+      ) : emptyEl('Estoque em dia', 'Nenhuma reposição sugerida no momento.', 'check'),
         '', 'truck');
     }
 
-    return '<div class="page-head"><div><h1>Compras e fornecedores</h1><p>Entrada de estoque, custo de compra e lista de reposição.</p></div></div>' +
-      '<div class="subtabs">' +
-        '<button data-ptab="list" class="' + (f.tab === 'list' ? 'active' : '') + '">' + icon('receipt', 14) + ' Compras</button>' +
-        '<button data-ptab="suppliers" class="' + (f.tab === 'suppliers' ? 'active' : '') + '">' + icon('truck', 14) + ' Fornecedores</button>' +
-        '<button data-ptab="sugestao" class="' + (f.tab === 'sugestao' ? 'active' : '') + '">' + icon('target', 14) + ' Lista de reposição</button>' +
-      '</div>' + body;
+    return frag(
+      pageHead('Compras e fornecedores', 'Entrada de estoque, custo de compra e lista de reposicao.', [
+        btn('Nova compra', 'plus', 'btn primary', function () { newPurchase(); })
+      ]),
+      el('div', { class: 'subtabs' }, [
+        el('button', { 'data-ptab': 'list', class: f.tab === 'list' ? 'active' : null }, [iconEl('receipt', 14), ' Compras']),
+        el('button', { 'data-ptab': 'suppliers', class: f.tab === 'suppliers' ? 'active' : null }, [iconEl('truck', 14), ' Fornecedores']),
+        el('button', { 'data-ptab': 'sugestao', class: f.tab === 'sugestao' ? 'active' : null }, [iconEl('target', 14), ' Lista de reposição'])
+      ]),
+      body
+    );
   };
 
   function newPurchase(items, supplierId) {
     var db = Store.db;
-    var pick = items || [];
-    if (!pick.length) { UI.toast('Selecione ao menos um produto.', 'warn'); return; }
+    var pick = items ? items.slice() : [];
+
+    function renderSelector() {
+      var produtos = db.products.filter(function (p) { return p.active; });
+      if (!produtos.length) return '<div class="modal-note warn">Cadastre um produto antes de registrar a compra. <button type="button" class="btn sm" data-pc-new-product>Cadastrar produto</button></div>';
+      return '<div class="form-grid"><label class="full"><span class="lbl">Adicionar produto</span><select class="field" id="pcProduct">' +
+        produtos.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.name) + ' - estoque ' + esc(String(p.stock)) + '</option>'; }).join('') +
+        '</select></label><label><span class="lbl">Quantidade</span><input class="field" id="pcQty" type="number" min="0.001" step="0.001" value="1"></label>' +
+        '<div class="row" style="align-items:end"><button type="button" class="btn" data-pc-add>Adicionar produto</button></div></div>';
+    }
 
     function renderList() {
+      if (!pick.length) return '<div class="modal-note">Nenhum produto adicionado. Escolha os produtos acima para iniciar a compra.</div>';
       return '<div class="table-wrap"><table><thead><tr><th>Produto</th><th class="right">Qtd</th><th class="right">Custo</th><th class="right">Total</th><th></th></tr></thead><tbody>' +
         pick.map(function (i, idx) {
           var p = db.products.find(function (x) { return x.id === i.id; });
@@ -900,12 +1136,24 @@
           UI.field('Número da nota', 'invoiceNo', '', { placeholder: 'opcional' }) +
           UI.field('Vencimento do pagamento', 'due', '', { type: 'date', hint: 'deixe vazio se pago à vista' }) +
         '</div>' +
-        '<div id="pcItems">' + renderList() + '</div>' +
+        renderSelector() +
+        '<div id="pcItems" class="mt-2">' + renderList() + '</div>' +
         '<div class="modal-note">Ao confirmar, o estoque é atualizado e o custo de cada produto é substituído pelo preço de compra informado.</div>',
       confirmText: 'Registrar compra',
       onMount: function (root, close) {
         var box = root.querySelector('#pcItems');
         function refresh() { box.innerHTML = renderList(); }
+        root.addEventListener('click', function (e) {
+          if (e.target.closest('[data-pc-new-product]')) { close(); editProduct(); return; }
+          if (e.target.closest('[data-pc-add]')) {
+            var sel = root.querySelector('#pcProduct'), qty = Number(root.querySelector('#pcQty').value);
+            var p = sel && db.products.find(function (x) { return x.id === sel.value; });
+            if (!p || !(qty > 0)) { UI.toast('Escolha um produto e informe uma quantidade valida.', 'warn'); return; }
+            var atual = pick.find(function (x) { return x.id === p.id; });
+            if (atual) atual.qty += qty; else pick.push({ id: p.id, qty: qty, cost: Number(p.cost) || 0 });
+            refresh();
+          }
+        });
         box.addEventListener('input', function (e) {
           var q = e.target.dataset.pq, c = e.target.dataset.pc;
           if (q != null) pick[Number(q)].qty = Number(e.target.value) || 0;
@@ -914,7 +1162,7 @@
         });
         box.addEventListener('click', function (e) {
           var d = e.target.closest('[data-pdel]');
-          if (d) { pick.splice(Number(d.dataset.pdel), 1); if (!pick.length) { close(); return; } refresh(); }
+          if (d) { pick.splice(Number(d.dataset.pdel), 1); refresh(); }
         });
         root.addEventListener('click', function (e) {
           if (!e.target.closest('[data-confirm]')) return;
@@ -935,22 +1183,28 @@
             paid: paid
           };
           db.purchases.unshift(pc);
+          Store.marcarCadastro('purchases', pc);
           // entrada de estoque + custo
           pick.forEach(function (i) {
             var p = db.products.find(function (x) { return x.id === i.id; });
             if (!p) return;
-            p.stock = Math.round((p.stock + i.qty) * 1000) / 1000;
+            if (p.stockDeposit == null) p.stockDeposit = p.stock;
+            p.stockDeposit = Math.round((p.stockDeposit + i.qty) * 1000) / 1000;
+            p.stock = Math.round((p.stockDeposit + (Number(p.stockSales) || 0)) * 1000) / 1000;
             if (i.cost > 0) p.cost = i.cost;
             if (sup) p.supplier = sup.name;
+            Store.marcarCadastro('products', p);
           });
-          db.entries.unshift({
+          var lancamentoCompra = {
             id: String(Store.nextId('entry')), date: pc.date,
             type: paid ? 'Saída' : 'A pagar',
             category: 'Compra de mercadoria',
             description: 'Compra ' + (sup ? sup.name : '') + (d.invoiceNo ? ' · NF ' + d.invoiceNo : ''),
             amount: pc.total, method: d.payMethod, source: pc.id,
             due: d.due || null, settled: paid
-          });
+          };
+          db.entries.unshift(lancamentoCompra);
+          Store.marcarCadastro('entries', lancamentoCompra);
           Store.save();
           rerender();
           UI.toast('Compra de ' + money(pc.total) + ' registrada. Estoque atualizado.', 'ok');
@@ -1000,42 +1254,56 @@
     });
     var debt = UI.round2(db.customers.reduce(function (a, c) { return a + (Number(c.debt) || 0); }, 0));
 
-    return '<div class="page-head"><div><h1>Clientes e crediário</h1><p>Cadastro, limites de fiado, recebimento e histórico.</p></div>' +
-      '<div class="actions"><button class="btn" onclick="App.exportCustomers()">' + icon('down', 14) + ' Exportar</button>' +
-      '<button class="btn primary" onclick="App.editCustomer()">' + icon('plus', 14) + ' Novo cliente</button></div></div>' +
+    return frag(
+      pageHead('Clientes e crediário', 'Cadastro, limites de fiado, recebimento e histórico.', [
+        btn('Exportar', 'down', 'btn', function () { exportCustomers(); }),
+        btn('Novo cliente', 'plus', 'btn primary', function () { editCustomer(); })
+      ]),
 
-      '<div class="grid kpis">' +
-        kpi('Clientes', String(db.customers.length), db.customers.filter(function (c) { return c.debt > 0; }).length + ' com saldo', 'accent') +
-        kpi('Total a receber', money(debt), 'fiado em aberto', 'purple') +
-        kpi('Ticket médio', money(db.customers.length ? db.sales.filter(function (s) { return s.customerId; }).reduce(function (a, s) { return a + s.total; }, 0) / Math.max(1, db.customers.length) : 0), 'por cliente') +
-        kpi('Limite concedido', money(UI.round2(db.customers.reduce(function (a, c) { return a + (Number(c.debtLimit) || 0); }, 0))), 'soma dos limites', 'blue') +
-      '</div>' +
+      el('div', { class: 'grid kpis' }, [
+        kpiEl('Clientes', String(db.customers.length), db.customers.filter(function (c) { return c.debt > 0; }).length + ' com saldo', 'accent'),
+        kpiEl('Total a receber', money(debt), 'fiado em aberto', 'purple'),
+        kpiEl('Ticket médio', money(db.customers.length ? db.sales.filter(function (s) { return s.customerId; }).reduce(function (a, s) { return a + s.total; }, 0) / Math.max(1, db.customers.length) : 0), 'por cliente'),
+        kpiEl('Limite concedido', money(UI.round2(db.customers.reduce(function (a, c) { return a + (Number(c.debtLimit) || 0); }, 0))), 'soma dos limites', 'blue')
+      ]),
 
-      card('Cadastro', '<div class="toolbar">' +
-        '<div class="search-wrap">' + icon('search', 15) + '<input class="field" id="custQ" placeholder="Buscar nome, telefone ou CPF" value="' + esc(f.q) + '"></div>' +
-        '<div class="btn-group"><button data-cf="all" class="' + (f.only === 'all' ? 'active' : '') + '">Todos</button>' +
-        '<button data-cf="debt" class="' + (f.only === 'debt' ? 'active' : '') + '">Com fiado</button></div></div>' +
-        customerTable(list), '', 'users');
+      cardEl('Cadastro', frag(
+        el('div', { class: 'toolbar' }, [
+          el('div', { class: 'search-wrap' }, [iconEl('search', 15),
+            el('input', { class: 'field', id: 'custQ', placeholder: 'Buscar nome, telefone ou CPF', value: f.q })]),
+          el('div', { class: 'btn-group' }, [
+            el('button', { 'data-cf': 'all', class: f.only === 'all' ? 'active' : null }, 'Todos'),
+            el('button', { 'data-cf': 'debt', class: f.only === 'debt' ? 'active' : null }, 'Com fiado')
+          ])
+        ]),
+        customerTable(list)
+      ), '', 'users')
+    );
   };
 
   function customerTable(list) {
-    if (!list.length) return empty('Nenhum cliente', 'Cadastre clientes para vender no crediário e Emitir recibos.', 'users');
-    return '<div class="table-wrap"><table><thead><tr><th>Cliente</th><th>Contato</th><th>CPF</th><th>Limite</th><th>Disponível</th><th class="right">Em aberto</th><th>Fidelidade</th><th></th></tr></thead><tbody>' +
+    if (!list.length) return emptyEl('Nenhum cliente', 'Cadastre clientes para vender no crediário e emitir recibos.', 'users');
+    var fidelidade = Store.db.loyalty && Store.db.loyalty.enabled;
+    return tabela(
+      ['Cliente', 'Contato', 'CPF', 'Limite', 'Disponível', { label: 'Em aberto', right: true }, 'Fidelidade', ''],
       list.map(function (c) {
         var lim = Number(c.debtLimit) || 0;
-        var disp = lim > 0 ? Math.max(0, lim - (Number(c.debt) || 0)) : Infinity;
-        return '<tr data-cust="' + esc(c.id) + '" class="clickable">' +
-          '<td><b>' + esc(c.name) + '</b>' + (c.address ? '<br><span class="tiny muted">' + esc(c.address) + '</span>' : '') + '</td>' +
-          '<td>' + (c.phone ? esc(c.phone) : '—') + '</td>' +
-          '<td class="tiny">' + (c.cpf ? esc(c.cpf) : '<span class="muted">sem CPF</span>') + '</td>' +
-          '<td>' + (lim > 0 ? money(lim) : '<span class="muted tiny">sem limite</span>') + '</td>' +
-          '<td>' + (lim > 0 ? '<span class="badge ' + (disp <= 0 ? 'red' : disp < lim * 0.2 ? 'amber' : 'green') + '">' + money(disp) + '</span>' : '—') + '</td>' +
-          '<td class="right num"><b style="color:' + (c.debt > 0 ? 'var(--amber)' : 'var(--text-3)') + '">' + money(c.debt) + '</b></td>' +
-          '<td>' + (Store.db.loyalty && Store.db.loyalty.enabled ? '<span class="badge purple">' + (c.points || 0) + ' pts</span>' : '—') + '</td>' +
-          '<td class="right nowrap">' +
-            (c.debt > 0 ? '<button class="btn sm primary" data-recv="' + esc(c.id) + '">Receber</button> ' : '') +
-            '<button class="btn sm" data-cec="' + esc(c.id) + '">Editar</button></td></tr>';
-      }).join('') + '</tbody></table></div>';
+        var deve = Number(c.debt) || 0;
+        var disp = lim > 0 ? Math.max(0, lim - deve) : Infinity;
+        return el('tr', { class: 'clickable', 'data-cust': c.id }, [
+          el('td', null, [el('b', null, c.name), c.address ? frag(el('br'), el('span', { class: 'tiny muted' }, c.address)) : null]),
+          el('td', null, c.phone || '—'),
+          el('td', { class: 'tiny' }, c.cpf || el('span', { class: 'muted' }, 'sem CPF')),
+          el('td', null, lim > 0 ? money(lim) : el('span', { class: 'muted tiny' }, 'sem limite')),
+          el('td', null, lim > 0 ? el('span', { class: 'badge ' + (disp <= 0 ? 'red' : disp < lim * 0.2 ? 'amber' : 'green') }, money(disp)) : '—'),
+          el('td', { class: 'right num' }, el('b', { style: { color: deve > 0 ? 'var(--amber)' : 'var(--text-3)' } }, money(deve))),
+          el('td', null, fidelidade ? el('span', { class: 'badge purple' }, (c.points || 0) + ' pts') : '—'),
+          el('td', { class: 'right nowrap' }, deve > 0
+            ? [el('button', { class: 'btn sm primary', 'data-recv': c.id }, 'Receber'), ' ', el('button', { class: 'btn sm', 'data-cec': c.id }, 'Editar')]
+            : el('button', { class: 'btn sm', 'data-cec': c.id }, 'Editar'))
+        ]);
+      })
+    );
   }
 
   function editCustomer(id) {
@@ -1199,54 +1467,71 @@
       };
     });
 
-    return '<div class="page-head"><div><h1>Financeiro</h1><p>Fluxo de caixa, despesas, recebimentos e crediário.</p></div>' +
-      '<div class="actions">' +
-        '<button class="btn" onclick="App.newEntry(\'Saída\')">' + icon('down', 14) + ' Despesa</button>' +
-        '<button class="btn" onclick="App.newEntry(\'Entrada\')">' + icon('up', 14) + ' Recebimento</button>' +
-        '<button class="btn primary" onclick="App.go(\'payables\')">' + icon('invoice', 14) + ' Contas a pagar</button>' +
-      '</div></div>' +
+    var toolbar = el('div', { class: 'toolbar' }, [
+      el('div', { class: 'search-wrap' }, [iconEl('search', 15),
+        el('input', { class: 'field', id: 'finQ', placeholder: 'Buscar descrição ou categoria', value: f.q })]),
+      el('select', { class: 'field', style: { width: 'auto' }, id: 'finType' },
+        [el('option', { value: 'all' }, 'Todos')].concat(['Entrada', 'Saída', 'A receber', 'A pagar'].map(function (t) {
+          var o = el('option', { value: t }, t);
+          if (f.type === t) o.setAttribute('selected', '');
+          return o;
+        }))),
+      el('select', { class: 'field', style: { width: 'auto' }, id: 'finPeriod' },
+        [['7', '7 dias'], ['30', '30 dias'], ['90', '90 dias'], ['0', 'Tudo']].map(function (o) {
+          var op = el('option', { value: o[0] }, o[1]);
+          if (f.period === o[0]) op.setAttribute('selected', '');
+          return op;
+        })),
+      el('button', { class: 'btn', id: 'finExport' }, [iconEl('down', 13), ' CSV'])
+    ]);
 
-      '<div class="grid kpis">' +
-        kpi('Entradas', money(ins), 'no período', 'green') +
-        kpi('Saídas', money(outs), 'no período', 'red') +
-        kpi('Saldo', money(UI.round2(ins - outs)), ins - outs >= 0 ? 'positivo' : 'negativo', ins - outs >= 0 ? 'teal' : 'red') +
-        kpi('A receber', money(recv), 'em aberto', 'purple') +
-        kpi('A pagar', money(pay), 'em aberto', 'amber') +
-      '</div>' +
+    return frag(
+      pageHead('Financeiro', 'Fluxo de caixa, despesas, recebimentos e crediário.', [
+        btn('Despesa', 'down', 'btn', function () { newEntry('Saída'); }),
+        btn('Recebimento', 'up', 'btn', function () { newEntry('Entrada'); }),
+        btn('Contas a pagar', 'invoice', 'btn primary', function () { go('payables'); })
+      ]),
 
-      '<div class="grid two mb-2">' +
-        card('Fluxo dos últimos 14 dias', UI.lineChart(flow, { height: 180 }), '', 'chart') +
-        card('Maiores despesas por categoria', catData.length ? UI.barChart(catData) : empty('Sem despesas no período', '', 'wallet'), '', 'percent') +
-      '</div>' +
+      el('div', { class: 'grid kpis' }, [
+        kpiEl('Entradas', money(ins), 'no período', 'green'),
+        kpiEl('Saídas', money(outs), 'no período', 'red'),
+        kpiEl('Saldo', money(UI.round2(ins - outs)), ins - outs >= 0 ? 'positivo' : 'negativo', ins - outs >= 0 ? 'teal' : 'red'),
+        kpiEl('A receber', money(recv), 'em aberto', 'purple'),
+        kpiEl('A pagar', money(pay), 'em aberto', 'amber')
+      ]),
 
-      card('Lançamentos', '<div class="toolbar">' +
-        '<div class="search-wrap">' + icon('search', 15) + '<input class="field" id="finQ" placeholder="Buscar descrição ou categoria" value="' + esc(f.q) + '"></div>' +
-        '<select class="field" style="width:auto" id="finType"><option value="all">Todos</option>' +
-        ['Entrada', 'Saída', 'A receber', 'A pagar'].map(function (t) { return '<option' + (f.type === t ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select>' +
-        '<select class="field" style="width:auto" id="finPeriod">' +
-        [['7', '7 dias'], ['30', '30 dias'], ['90', '90 dias'], ['0', 'Tudo']]
-          .map(function (o) { return '<option value="' + o[0] + '"' + (f.period === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>' +
-        '<button class="btn" id="finExport">' + icon('down', 13) + ' CSV</button></div>' +
-        entryTable(all), '', 'wallet');
+      el('div', { class: 'grid two mb-2' }, [
+        cardEl('Fluxo dos últimos 14 dias', UI.lineChartEl(flow, { height: 180 }), '', 'chart'),
+        cardEl('Maiores despesas por categoria', catData.length ? UI.barChartEl(catData) : emptyEl('Sem despesas no período', '', 'wallet'), '', 'percent')
+      ]),
+
+      cardEl('Lançamentos', frag(toolbar, entryTable(all)), '', 'wallet')
+    );
   };
 
   function entryTable(list) {
-    if (!list.length) return empty('Nenhum lançamento', 'As vendas e movimentações aparecem aqui.', 'wallet');
-    return '<div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Forma</th><th>Vencimento</th><th class="right">Valor</th><th></th></tr></thead><tbody>' +
+    if (!list.length) return emptyEl('Nenhum lançamento', 'As vendas e movimentações aparecem aqui.', 'wallet');
+    return tabela(
+      ['Data', 'Tipo', 'Categoria', 'Descrição', 'Forma', 'Vencimento', { label: 'Valor', right: true }, ''],
       list.slice(0, 300).map(function (e) {
         var overdue = (e.type === 'A pagar' || e.type === 'A receber') && !e.settled && e.due && UI.daysBetween(UI.today(), e.due) < 0;
         var tone = e.type === 'Entrada' ? 'green' : e.type === 'Saída' ? 'red' : e.type === 'A receber' ? 'purple' : 'amber';
-        return '<tr><td class="nowrap">' + UI.dt(e.date) + '</td>' +
-          '<td><span class="badge ' + tone + '">' + esc(e.type) + '</span></td>' +
-          '<td>' + esc(e.category) + '</td>' +
-          '<td>' + esc(e.description) + (e.method === 'Estoque' ? ' <span class="badge gray">estoque</span>' : '') + '</td>' +
-          '<td>' + esc(e.method || '—') + '</td>' +
-          '<td class="tiny">' + (e.due ? (overdue ? '<span class="badge red">vencido</span> ' : '') + UI.dateOnly(e.due) : '—') + '</td>' +
-          '<td class="right num"><b style="color:' + (e.type === 'Saída' ? 'var(--red)' : e.type === 'Entrada' ? 'var(--accent-3)' : 'var(--text)') + '">' +
-            (e.type === 'Saída' ? '− ' : '+ ') + money(e.amount) + '</b></td>' +
-          '<td class="right">' + ((e.type === 'A pagar' || e.type === 'A receber') && !e.settled ?
-            '<button class="btn sm" data-settle="' + esc(e.id) + '">Baixar</button>' : '') + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
+        var cor = e.type === 'Saída' ? 'var(--red)' : e.type === 'Entrada' ? 'var(--accent-3)' : 'var(--text)';
+        return el('tr', null, [
+          el('td', { class: 'nowrap' }, UI.dt(e.date)),
+          el('td', null, el('span', { class: 'badge ' + tone }, e.type)),
+          el('td', null, e.category),
+          el('td', null, [e.description, e.method === 'Estoque' ? frag(' ', el('span', { class: 'badge gray' }, 'estoque')) : null]),
+          el('td', null, e.method || '—'),
+          el('td', { class: 'tiny' }, e.due
+            ? [overdue ? frag(el('span', { class: 'badge red' }, 'vencido'), ' ') : null, UI.dateOnly(e.due)]
+            : '—'),
+          el('td', { class: 'right num' }, el('b', { style: { color: cor } }, (e.type === 'Saída' ? '− ' : '+ ') + money(e.amount))),
+          el('td', { class: 'right' }, ((e.type === 'A pagar' || e.type === 'A receber') && !e.settled)
+            ? el('button', { class: 'btn sm', 'data-settle': e.id }, 'Baixar') : null)
+        ]);
+      })
+    );
   }
 
   function newEntry(type) {
@@ -1304,40 +1589,52 @@
       return d >= 0 && d <= 7;
     }).reduce(function (a, e) { return a + e.amount; }, 0));
 
-    return '<div class="page-head"><div><h1>Contas a pagar e receber</h1><p>Compromissos, vencimentos e baixa de títulos.</p></div>' +
-      '<div class="actions"><button class="btn" onclick="App.newEntry(\'' + (isPay ? 'Saída' : 'Entrada') + '\')">' +
-        icon('plus', 14) + (isPay ? ' Nova conta a pagar' : ' Novo recebimento') + '</button></div></div>' +
+    return frag(
+      pageHead('Contas a pagar e receber', 'Compromissos, vencimentos e baixa de títulos.', [
+        btn(isPay ? 'Nova conta a pagar' : 'Novo recebimento', 'plus', 'btn', function () { newEntry(isPay ? 'Saída' : 'Entrada'); })
+      ]),
 
-      '<div class="grid kpis">' +
-        kpi(isPay ? 'Total a pagar' : 'Total a receber', money(total), list.length + ' título(s)', isPay ? 'amber' : 'purple') +
-        kpi('Vencidos', money(overdue), 'atrasados', 'red') +
-        kpi('Vencem em 7 dias', money(soon), 'atenção', 'amber') +
-        kpi('Quitados', String(db.entries.filter(function (e) { return e.settled && (e.type === 'A pagar' || e.type === 'A receber'); }).length), 'histórico', 'green') +
-      '</div>' +
+      el('div', { class: 'grid kpis' }, [
+        kpiEl(isPay ? 'Total a pagar' : 'Total a receber', money(total), list.length + ' título(s)', isPay ? 'amber' : 'purple'),
+        kpiEl('Vencidos', money(overdue), 'atrasados', 'red'),
+        kpiEl('Vencem em 7 dias', money(soon), 'atenção', 'amber'),
+        kpiEl('Quitados', String(db.entries.filter(function (e) { return e.settled && (e.type === 'A pagar' || e.type === 'A receber'); }).length), 'histórico', 'green')
+      ]),
 
-      '<div class="subtabs">' +
-        '<button data-atab="pagar" class="' + (isPay ? 'active' : '') + '">' + icon('invoice', 14) + ' A pagar</button>' +
-        '<button data-atab="receber" class="' + (!isPay ? 'active' : '') + '">' + icon('debt', 14) + ' A receber</button>' +
-      '</div>' +
+      el('div', { class: 'subtabs' }, [
+        el('button', { 'data-atab': 'pagar', class: isPay ? 'active' : null }, [iconEl('invoice', 14), ' A pagar']),
+        el('button', { 'data-atab': 'receber', class: !isPay ? 'active' : null }, [iconEl('debt', 14), ' A receber'])
+      ]),
 
-      card(isPay ? 'Contas a pagar' : 'Contas a receber', list.length ?
-        '<div class="table-wrap"><table><thead><tr><th>Vencimento</th><th>Descrição</th><th>Categoria</th><th>Forma</th><th>Situação</th><th class="right">Valor</th><th></th></tr></thead><tbody>' +
-        list.map(function (e) {
-          var d = e.due ? UI.daysBetween(UI.today(), e.due) : null;
-          var sit = d === null ? '<span class="badge gray">sem data</span>'
-            : d < 0 ? '<span class="badge red">vencido ' + Math.abs(d) + 'd</span>'
-            : d === 0 ? '<span class="badge amber">vence hoje</span>'
-            : d <= 7 ? '<span class="badge amber">faltam ' + d + 'd</span>'
-            : '<span class="badge green">faltam ' + d + 'd</span>';
-          return '<tr><td class="nowrap">' + (e.due ? UI.dateOnly(e.due) : '—') + '</td>' +
-            '<td><b>' + esc(e.description) + '</b></td>' +
-            '<td>' + esc(e.category) + '</td><td>' + esc(e.method || '—') + '</td>' +
-            '<td>' + sit + '</td>' +
-            '<td class="right num"><b>' + money(e.amount) + '</b></td>' +
-            '<td class="right"><button class="btn sm primary" data-settle="' + esc(e.id) + '">Quitar</button></td></tr>';
-        }).join('') + '</tbody><tfoot><tr><td colspan="5">Total</td><td class="right num">' + money(total) + '</td><td></td></tr></tfoot></table></div>'
-        : empty(isPay ? 'Nenhuma conta a pagar' : 'Nenhum título a receber', isPay ? 'Registre compras e despesas pendentes.' : 'O crediário aparece aqui quando há venda a prazo.', isPay ? 'invoice' : 'debt'),
-        '', isPay ? 'invoice' : 'debt');
+      cardEl(isPay ? 'Contas a pagar' : 'Contas a receber', list.length ?
+        tabela(
+          ['Vencimento', 'Descrição', 'Categoria', 'Forma', 'Situação', { label: 'Valor', right: true }, ''],
+          list.map(function (e) {
+            var d = e.due ? UI.daysBetween(UI.today(), e.due) : null;
+            var sit = d === null ? el('span', { class: 'badge gray' }, 'sem data')
+              : d < 0 ? el('span', { class: 'badge red' }, 'vencido ' + Math.abs(d) + 'd')
+              : d === 0 ? el('span', { class: 'badge amber' }, 'vence hoje')
+              : d <= 7 ? el('span', { class: 'badge amber' }, 'faltam ' + d + 'd')
+              : el('span', { class: 'badge green' }, 'faltam ' + d + 'd');
+            return el('tr', null, [
+              el('td', { class: 'nowrap' }, e.due ? UI.dateOnly(e.due) : '—'),
+              el('td', null, el('b', null, e.description)),
+              el('td', null, e.category),
+              el('td', null, e.method || '—'),
+              el('td', null, sit),
+              el('td', { class: 'right num' }, el('b', null, money(e.amount))),
+              el('td', { class: 'right' }, el('button', { class: 'btn sm primary', 'data-settle': e.id }, 'Quitar'))
+            ]);
+          }),
+          el('tfoot', null, el('tr', null, [
+            el('td', { colspan: 5 }, 'Total'),
+            el('td', { class: 'right num' }, money(total)),
+            el('td')
+          ]))
+        )
+        : emptyEl(isPay ? 'Nenhuma conta a pagar' : 'Nenhum título a receber', isPay ? 'Registre compras e despesas pendentes.' : 'O crediário aparece aqui quando há venda a prazo.', isPay ? 'invoice' : 'debt'),
+        '', isPay ? 'invoice' : 'debt')
+    );
   };
 
   function settleEntry(id) {
@@ -1440,69 +1737,93 @@
     var outs = UI.round2(db.entries.filter(function (e) { return e.type === 'Saída' && (!from || new Date(e.date) >= from); }).reduce(function (a, e) { return a + e.amount; }, 0));
     var taxes = UI.round2(outs * 0.06);
 
-    return '<div class="page-head"><div><h1>Relatórios</h1><p>Indicadores calculados a partir das vendas, estoque e lançamentos reais.</p></div>' +
-      '<div class="actions"><button class="btn" onclick="App.printDRE()">' + icon('print', 14) + ' Imprimir DRE</button>' +
-      '<button class="btn primary" onclick="UI.downloadBackup()">' + icon('save', 14) + ' Backup</button></div></div>' +
+    return frag(
+      pageHead('Relatórios', 'Indicadores calculados a partir das vendas, estoque e lançamentos reais.', [
+        btn('Imprimir DRE', 'print', 'btn', function () { printDRE(); }),
+        btn('Backup', 'save', 'btn primary', function () { UI.downloadBackup(); })
+      ]),
 
-      '<div class="toolbar"><div class="btn-group">' +
+      el('div', { class: 'toolbar' }, el('div', { class: 'btn-group' },
         [['7', '7 dias'], ['30', '30 dias'], ['90', '90 dias'], ['0', 'Tudo']].map(function (o) {
-          return '<button data-rp="' + o[0] + '" class="' + (f.period === o[0] ? 'active' : '') + '">' + o[1] + '</button>';
-        }).join('') + '</div></div>' +
+          return el('button', { 'data-rp': o[0], class: f.period === o[0] ? 'active' : null }, o[1]);
+        }))),
 
-      '<div class="grid kpis">' +
-        kpi('Receita', money(rev), sales.length + ' vendas', 'accent') +
-        kpi('Custo dos produtos', money(cost), 'CMV', 'red') +
-        kpi('Lucro bruto', money(UI.round2(rev - cost)), rev ? 'margem ' + UI.pct(rev ? (rev - cost) / rev * 100 : 0) : '—', 'teal') +
-        kpi('Ticket médio', money(sales.length ? rev / sales.length : 0), 'por venda') +
-        kpi('Itens vendidos', String(UI.round2(sales.reduce(function (a, s) { return a + s.items.reduce(function (b, i) { return b + i.qty; }, 0); }, 0))), 'unidades', 'blue') +
-      '</div>' +
+      el('div', { class: 'grid kpis' }, [
+        kpiEl('Receita', money(rev), sales.length + ' vendas', 'accent'),
+        kpiEl('Custo dos produtos', money(cost), 'CMV', 'red'),
+        kpiEl('Lucro bruto', money(UI.round2(rev - cost)), rev ? 'margem ' + UI.pct(rev ? (rev - cost) / rev * 100 : 0) : '—', 'teal'),
+        kpiEl('Ticket médio', money(sales.length ? rev / sales.length : 0), 'por venda'),
+        kpiEl('Itens vendidos', String(UI.round2(sales.reduce(function (a, s) { return a + s.items.reduce(function (b, i) { return b + i.qty; }, 0); }, 0))), 'unidades', 'blue')
+      ]),
 
-      '<div class="grid two mb-2">' +
-        card('Receita por dia', dailySeries(days || 30), '', 'chart') +
-        card('Vendas por categoria', catData.length ? UI.donutChart(catData) : empty('Sem vendas no período', '', 'chart'), '', 'percent') +
-      '</div>' +
+      el('div', { class: 'grid two mb-2' }, [
+        cardEl('Receita por dia', dailySeries(days || 30), '', 'chart'),
+        cardEl('Vendas por categoria', catData.length ? UI.donutChartEl(catData) : emptyEl('Sem vendas no período', '', 'chart'), '', 'percent')
+      ]),
 
-      '<div class="grid two mb-2">' +
-        card('Mais vendidos (unidades)', topQty.length ? UI.barChart(topQty.map(function (p) { return { l: (p.emoji || '') + ' ' + p.name, v: p.qty }; }), { fmt: 'count' }) : empty('—', '', 'box'), '', 'box') +
-        card('Mais lucrativos', topProfit.length ? UI.barChart(topProfit.map(function (p) { return { l: (p.emoji || '') + ' ' + p.name, v: p.profit }; })) : empty('—', '', 'percent'), '', 'percent') +
-      '</div>' +
+      el('div', { class: 'grid two mb-2' }, [
+        cardEl('Mais vendidos (unidades)', topQty.length ? UI.barChartEl(topQty.map(function (p) { return { l: (p.emoji || '') + ' ' + p.name, v: p.qty }; }), { fmt: 'count' }) : emptyEl('—', '', 'box'), '', 'box'),
+        cardEl('Mais lucrativos', topProfit.length ? UI.barChartEl(topProfit.map(function (p) { return { l: (p.emoji || '') + ' ' + p.name, v: p.profit }; })) : emptyEl('—', '', 'percent'), '', 'percent')
+      ]),
 
-      '<div class="grid two mb-2">' +
-        card('Horários de maior movimento', hourData.length ? UI.barChart(hourData) : empty('—', '', 'clock'), '', 'clock') +
-        card('Desempenho por operador', Object.keys(byOp).length ? UI.barChart(Object.keys(byOp).map(function (k) { return { l: k, v: byOp[k] }; })) : empty('—', '', 'user'), '', 'user') +
-      '</div>' +
+      el('div', { class: 'grid two mb-2' }, [
+        cardEl('Horários de maior movimento', hourData.length ? UI.barChartEl(hourData) : emptyEl('—', '', 'clock'), '', 'clock'),
+        cardEl('Desempenho por operador', Object.keys(byOp).length ? UI.barChartEl(Object.keys(byOp).map(function (k) { return { l: k, v: byOp[k] }; })) : emptyEl('—', '', 'user'), '', 'user')
+      ]),
 
-      '<div class="grid two mb-2">' +
-        card('Curva ABC (giro)', abcRows.length ?
-          '<div class="modal-note" style="margin:0 0 11px">Classe <b>A</b>: até 80% do faturamento · <b>B</b>: até 95% · <b>C</b>: cauda longa. Monitore o estoque das classes A com mais cuidado.</div>' +
-          '<div class="table-wrap"><table><thead><tr><th>Produto</th><th class="right">Un.</th><th class="right">Receita</th><th class="right">Part.</th><th class="right">Acum.</th><th>Classe</th></tr></thead><tbody>' +
-          abcRows.slice(0, 14).map(function (r) {
-            return '<tr><td><b>' + esc(r.name) + '</b></td><td class="right num">' + r.qty + '</td>' +
-              '<td class="right num">' + money(r.revenue) + '</td><td class="right num">' + UI.pct(r.share) + '</td>' +
-              '<td class="right num">' + UI.pct(r.cum) + '</td>' +
-              '<td><span class="badge ' + (r.cls === 'A' ? 'green' : r.cls === 'B' ? 'amber' : 'gray') + '">' + r.cls + '</span></td></tr>';
-          }).join('') + '</tbody></table></div>'
-          : empty('—', '', 'target'), '', 'target') +
-        card('DRE simplificada do período',
-          '<div class="stat-mini"><span>Receita bruta de vendas</span><b>' + money(rev) + '</b></div>' +
-          '<div class="stat-mini"><span>(−) Custo dos produtos (CMV)</span><b style="color:var(--red)">' + money(cost) + '</b></div>' +
-          '<div class="stat-mini total"><span>= Lucro bruto</span><b style="color:var(--accent-3)">' + money(UI.round2(rev - cost)) + '</b></div>' +
-          '<div class="stat-mini"><span>(−) Despesas operacional</span><b style="color:var(--red)">' + money(outs) + '</b></div>' +
-          '<div class="stat-mini"><span>(−) Estimativa de impostos (6%)</span><b style="color:var(--red)">' + money(taxes) + '</b></div>' +
-          '<div class="stat-mini total"><span>= Resultado estimado</span><b style="color:' + (rev - cost - outs - taxes >= 0 ? 'var(--accent-3)' : 'var(--red)') + '">' + money(UI.round2(rev - cost - outs - taxes)) + '</b></div>' +
-          '<div class="modal-note warn" style="margin-top:11px">' + icon('info', 12) + ' Impostos aqui são uma <b>estimativa fixa de 6%</b>. O Simples Nacional varia de 4% a 13% conforme a faixa de faturamento. Consulte o contador.</div>',
-          '', 'invoice') +
-      '</div>' +
+      el('div', { class: 'grid two mb-2' }, [
+        cardEl('Curva ABC (giro)', abcRows.length ? frag(
+          el('div', { class: 'modal-note', style: { margin: '0 0 11px' } }, [
+            'Classe ', el('b', null, 'A'), ': até 80% do faturamento · ',
+            el('b', null, 'B'), ': até 95% · ', el('b', null, 'C'),
+            ': cauda longa. Monitore o estoque das classes A com mais cuidado.'
+          ]),
+          tabela(
+            ['Produto', { label: 'Un.', right: true }, { label: 'Receita', right: true }, { label: 'Part.', right: true }, { label: 'Acum.', right: true }, 'Classe'],
+            abcRows.slice(0, 14).map(function (r) {
+              return el('tr', null, [
+                el('td', null, el('b', null, r.name)),
+                el('td', { class: 'right num' }, String(r.qty)),
+                el('td', { class: 'right num' }, money(r.revenue)),
+                el('td', { class: 'right num' }, UI.pct(r.share)),
+                el('td', { class: 'right num' }, UI.pct(r.cum)),
+                el('td', null, el('span', { class: 'badge ' + (r.cls === 'A' ? 'green' : r.cls === 'B' ? 'amber' : 'gray') }, r.cls))
+              ]);
+            })
+          )
+        ) : emptyEl('—', '', 'target'), '', 'target'),
+        cardEl('DRE simplificada do período', frag(
+          [
+            ['Receita bruta de vendas', money(rev), null, false],
+            ['(−) Custo dos produtos (CMV)', money(cost), 'var(--red)', false],
+            ['= Lucro bruto', money(UI.round2(rev - cost)), 'var(--accent-3)', true],
+            ['(−) Despesas operacional', money(outs), 'var(--red)', false],
+            ['(−) Estimativa de impostos (6%)', money(taxes), 'var(--red)', false],
+            ['= Resultado estimado', money(UI.round2(rev - cost - outs - taxes)), rev - cost - outs - taxes >= 0 ? 'var(--accent-3)' : 'var(--red)', true]
+          ].map(function (r) {
+            return el('div', { class: 'stat-mini' + (r[3] ? ' total' : '') }, [
+              el('span', null, r[0]),
+              el('b', r[2] ? { style: { color: r[2] } } : null, r[1])
+            ]);
+          }),
+          el('div', { class: 'modal-note warn', style: { 'margin-top': '11px' } }, [
+            iconEl('info', 12),
+            ' Impostos aqui são uma ', el('b', null, 'estimativa fixa de 6%'),
+            '. O Simples Nacional varia de 4% a 13% conforme a faixa de faturamento. Consulte o contador.'
+          ])
+        ), '', 'invoice')
+      ]),
 
-      card('Valor de estoque por categoria', catData.length ? UI.barChart(db.categories.map(function (c) {
+      cardEl('Valor de estoque por categoria', catData.length ? UI.barChartEl(db.categories.map(function (c) {
         var v = UI.round2(db.products.filter(function (p) { return p.category === c.id; }).reduce(function (a, p) { return a + p.stock * p.cost; }, 0));
         return { l: c.emoji + ' ' + c.name, v: v, c: c.color };
-      }).filter(function (x) { return x.v > 0; })) : empty('—', '', 'box'), '', 'layers');
+      }).filter(function (x) { return x.v > 0; })) : emptyEl('—', '', 'box'), '', 'layers')
+    );
   };
 
   function dailySeries(days) {
     var n = Math.min(days || 30, 90);
-    return UI.lineChart(lastDays(n).map(function (d) { return { l: d.label, v: totalOf(salesOfDay(d.key)) }; }));
+    return UI.lineChartEl(lastDays(n).map(function (d) { return { l: d.label, v: totalOf(salesOfDay(d.key)) }; }));
   }
 
   function printDRE() {
@@ -1529,115 +1850,310 @@
     var db = Store.db;
     var u = Store.currentUser();
     var cfg = db.config;
-    return '<div class="page-head"><div><h1>Configurações</h1><p>Loja, operação, fiscal, tema, usuários e dados.</p></div></div>' +
-      '<div class="grid two">' +
-        '<div class="grid" style="gap:13px;align-content:start">' +
-          card('Identificação da loja', cfgForm('loja'), '', 'store') +
-          card('Caixa e operação', cfgForm('operacao'), '', 'wallet') +
-          card('Fiscal e NFC-e', cfgForm('fiscal'), '', 'file') +
-          card('Impressão e tema', cfgForm('tema'), '', 'print') +
-        '</div>' +
-        '<div class="grid" style="gap:13px;align-content:start">' +
-          card('Formas de pagamento', paymentConfig(), '', 'card') +
-          card('Categorias de produto', categoryConfig(), '', 'tag') +
-          card('Usuários e acessos', usersBlock(), '', 'users') +
-          card('Dados e segurança', dataBlock(), '', 'save') +
-        '</div>' +
-      '</div>';
+    return frag(
+      pageHead('Configurações', 'Loja, operação, fiscal, tema, usuários e dados.'),
+      el('div', { class: 'grid two' }, [
+        el('div', { class: 'grid', style: { gap: '13px', 'align-content': 'start' } }, [
+          cardEl('Identificação da loja', cfgForm('loja'), '', 'store'),
+          cardEl('Caixa e operação', cfgForm('operacao'), '', 'wallet'),
+          cardEl('Fiscal e NFC-e', cfgForm('fiscal'), '', 'file'),
+          cardEl('Impressão e tema', cfgForm('tema'), '', 'print')
+        ]),
+        el('div', { class: 'grid', style: { gap: '13px', 'align-content': 'start' } }, [
+          cardEl('Preços e promoções', priceTools(), '', 'tag'),
+          cardEl('Formas de pagamento', paymentConfig(), '', 'card'),
+          cardEl('Categorias de produto', categoryConfig(), '', 'tag'),
+          (u && u.role === 'admin' ? cardEl('Usuarios e acessos', usersBlock(), '', 'users') : null),
+          cardEl('Dados e segurança', dataBlock(), '', 'save')
+        ])
+      ])
+    );
   };
 
   function cfgForm(which) {
     var cfg = Store.db.config;
     if (which === 'loja') {
-      return '<div class="form-grid">' +
-        UI.field('Nome da loja', 'storeName', cfg.storeName, { full: true }) +
-        UI.field('CNPJ', 'cnpj', cfg.cnpj) + UI.field('Inscrição estadual', 'ie', cfg.ie) +
-        UI.field('Endereço', 'address', cfg.address, { full: true }) +
-        UI.field('Telefone', 'phone', cfg.phone) +
-        UI.field('Regime tributário', 'taxRegime', cfg.taxRegime, { type: 'select', options: ['Simples Nacional', 'Simples Nacional - excesso de sublimite', 'Regime Normal (Lucro Real/Presumido)'] }) +
-        '</div><button class="btn primary mt-2" data-save="loja">' + icon('save', 14) + ' Salvar loja</button>';
+      return frag(
+        el('div', { class: 'form-grid' }, [
+          UI.fieldEl('Nome da loja', 'storeName', cfg.storeName, { full: true }),
+          UI.fieldEl('CNPJ', 'cnpj', cfg.cnpj),
+          UI.fieldEl('Inscrição estadual', 'ie', cfg.ie),
+          UI.fieldEl('Endereço', 'address', cfg.address, { full: true }),
+          UI.fieldEl('Telefone', 'phone', cfg.phone),
+          UI.fieldEl('Regime tributário', 'taxRegime', cfg.taxRegime, { type: 'select', options: ['Simples Nacional', 'Simples Nacional - excesso de sublimite', 'Regime Normal (Lucro Real/Presumido)'] })
+        ]),
+        el('button', { class: 'btn primary mt-2', 'data-save': 'loja' }, [iconEl('save', 14), ' Salvar loja'])
+      );
     }
     if (which === 'operacao') {
-      return '<div class="form-grid">' +
-        UI.field('Operador padrão', 'operator', cfg.operator) +
-        UI.field('Desconto máximo por venda (R$)', 'maxDiscount', cfg.maxDiscount, { type: 'money', step: '0.01', min: 0 }) +
-        UI.field('Fundo de caixa sugerido (R$)', 'cashOpening', cfg.cashOpening, { type: 'money', step: '0.01', min: 0 }) +
-        '</div>' +
-        '<div class="mt-1">' +
-          UI.checkbox('Permitir venda com estoque negativo', 'allowNegativeStock', cfg.allowNegativeStock, 'Evita bloquear a venda quando o caixa está atrasado na contagem.') +
-          UI.checkbox('Exigir CPF do cliente para crediário', 'requireCustomerOnCredit', cfg.requireCustomerOnCredit) +
-        '</div>' +
-        '<button class="btn primary mt-2" data-save="operacao">' + icon('save', 14) + ' Salvar operação</button>';
+      return frag(
+        el('div', { class: 'form-grid' }, [
+          UI.fieldEl('Operador padrão', 'operator', cfg.operator),
+          UI.fieldEl('Desconto máximo por venda (R$)', 'maxDiscount', cfg.maxDiscount, { type: 'money', step: '0.01', min: 0 }),
+          UI.fieldEl('Fundo de caixa sugerido (R$)', 'cashOpening', cfg.cashOpening, { type: 'money', step: '0.01', min: 0 })
+        ]),
+        el('div', { class: 'mt-1' }, [
+          UI.checkboxEl('Permitir venda com estoque negativo', 'allowNegativeStock', cfg.allowNegativeStock, 'Evita bloquear a venda quando o caixa está atrasado na contagem.'),
+          UI.checkboxEl('Exigir CPF do cliente para crediário', 'requireCustomerOnCredit', cfg.requireCustomerOnCredit)
+        ]),
+        el('button', { class: 'btn primary mt-2', 'data-save': 'operacao' }, [iconEl('save', 14), ' Salvar operação'])
+      );
     }
     if (which === 'fiscal') {
-      return '<div class="form-grid">' +
-        UI.field('Chave Pix (CPF/CNPJ, e-mail, telefone ou aleatória)', 'pixKey', cfg.pix.pixKey, { full: true, placeholder: 'ex.: 11999998888 ou loja@email.com' }) +
-        UI.field('Cidade do recebedor', 'pixCity', cfg.pix.city, { placeholder: 'SAO PAULO' }) +
-        '</div>' +
-        '<div class="modal-note warn mt-1">' + icon('alert', 12) +
-        ' <b>Este sistema não emite NFC-e.</b> Sem servidor, certificado digital e comunicação com a SEFAZ não é possível emitir nota fiscal válida. O que o PDV faz: prepara NCM/CFOP/CSOSN no cadastro, gera QR Pix de cobrança e imprime o comprovante auxiliar de venda (CANFE).</div>' +
-        '<button class="btn primary mt-2" data-save="fiscal">' + icon('save', 14) + ' Salvar fiscal</button>';
+      return frag(
+        el('div', { class: 'form-grid' }, [
+          UI.fieldEl('Chave Pix (CPF/CNPJ, e-mail, telefone ou aleatória)', 'pixKey', cfg.pix.pixKey, { full: true, placeholder: 'ex.: 11999998888 ou loja@email.com' }),
+          UI.fieldEl('Cidade do recebedor Pix', 'pixCity', cfg.pix.city, { placeholder: 'SAO PAULO' }),
+          UI.fieldEl('Inscricao municipal', 'municipalRegistration', cfg.municipalRegistration || ''),
+          UI.fieldEl('CRT (codigo do regime)', 'crt', cfg.crt || '', { type: 'select', options: [
+            { value: '', label: 'Selecionar com o contador' }, { value: '1', label: '1 - Simples Nacional' },
+            { value: '2', label: '2 - Simples Nacional - excesso de sublimite' }, { value: '3', label: '3 - Regime normal' },
+            { value: '4', label: '4 - MEI' }] }),
+          UI.fieldEl('CNAE principal', 'cnae', cfg.cnae || '', { placeholder: 'Informado pelo contador' }),
+          UI.fieldEl('Codigo IBGE do municipio', 'municipalityCode', cfg.municipalityCode || ''),
+          UI.fieldEl('CEP fiscal', 'zipCode', cfg.zipCode || '', { placeholder: '00000-000' }),
+          UI.fieldEl('UF', 'state', cfg.state || '', { placeholder: 'UF' }),
+          UI.fieldEl('Municipio', 'city', cfg.city || '', { full: true }),
+          UI.fieldEl('Bairro', 'district', cfg.district || ''),
+          UI.fieldEl('Numero', 'addressNumber', cfg.addressNumber || ''),
+          UI.fieldEl('Complemento', 'addressComplement', cfg.addressComplement || ''),
+          UI.fieldEl('Telefone fiscal', 'fiscalPhone', cfg.fiscalPhone || ''),
+          UI.fieldEl('E-mail fiscal', 'fiscalEmail', cfg.fiscalEmail || '', { full: true })
+        ]),
+        el('div', { class: 'modal-note warn mt-1' }, [
+          iconEl('alert', 12), ' ', el('b', null, 'Este sistema não emite NFC-e.'),
+          ' Sem servidor, certificado digital e comunicação com a SEFAZ não é possível emitir nota fiscal válida. O que o PDV faz: prepara NCM/CFOP/CSOSN no cadastro, gera QR Pix de cobrança e imprime o comprovante auxiliar de venda (CANFE).'
+        ]),
+        el('div', { class: 'modal-note mt-1' }, 'Os dados preenchidos ficam salvos para uma futura integracao fiscal. O PDV ainda nao transmite documentos para a SEFAZ.'),
+        el('button', { class: 'btn primary mt-2', 'data-save': 'fiscal' }, [iconEl('save', 14), ' Salvar fiscal'])
+      );
     }
-    return '<div class="form-grid">' +
-      UI.field('Mensagem no cupom', 'receiptFooter', cfg.receiptFooter, { full: true }) +
-      UI.field('Largura do cupom', 'printWidth', cfg.printWidth, { type: 'select', options: [{ value: 80, label: '80 mm (padrão)' }, { value: 58, label: '58 mm (bobina pequena)' }] }) +
-      UI.field('Tema da interface', 'theme', cfg.theme, { type: 'select', options: [{ value: 'dark', label: 'Escuro (padrão)' }, { value: 'light', label: 'Claro' }] }) +
-      '</div>' +
-      '<div class="modal-note mt-1">Atalho: <span class="kbd">Ctrl</span> + <span class="kbd">Shift</span> + <span class="kbd">D</span> alterna o tema a qualquer momento.</div>' +
-      '<button class="btn primary mt-2" data-save="tema">' + icon('save', 14) + ' Salvar aparência</button>';
+    return frag(
+      el('div', { class: 'form-grid' }, [
+        UI.fieldEl('Mensagem no cupom', 'receiptFooter', cfg.receiptFooter, { full: true }),
+        UI.fieldEl('Largura do cupom', 'printWidth', cfg.printWidth, { type: 'select', options: [{ value: 80, label: '80 mm (padrão)' }, { value: 58, label: '58 mm (bobina pequena)' }] }),
+        UI.fieldEl('Tema da interface', 'theme', cfg.theme, { type: 'select', options: [{ value: 'dark', label: 'Escuro (padrão)' }, { value: 'light', label: 'Claro' }] })
+      ]),
+      el('div', { class: 'modal-note mt-1' }, ['Atalho: ', el('span', { class: 'kbd' }, 'Ctrl'), ' + ', el('span', { class: 'kbd' }, 'Shift'), ' + ', el('span', { class: 'kbd' }, 'D'), ' alterna o tema a qualquer momento.']),
+      el('button', { class: 'btn primary mt-2', 'data-save': 'tema' }, [iconEl('save', 14), ' Salvar aparência'])
+    );
   }
 
   function paymentConfig() {
     var cfg = Store.db.config;
     var all = ['Dinheiro', 'Pix', 'Débito', 'Crédito', 'Crediário', 'Vale', 'Boleto'];
-    return '<div class="row tight mb-2">' + all.map(function (m) {
-      var on = cfg.paymentMethods.indexOf(m) > -1;
-      return '<button class="btn sm ' + (on ? 'primary' : 'ghost') + '" data-pay="' + esc(m) + '">' + (on ? icon('check', 12) + ' ' : '+ ') + esc(m) + '</button>';
-    }).join('') + '</div>' +
-    '<div class="modal-note">As formas marcadas aparecem no painel de pagamento da frente de caixa, na ordem em que foram ativadas.</div>';
+    return frag(
+      el('div', { class: 'row tight mb-2' }, all.map(function (m) {
+        var on = cfg.paymentMethods.indexOf(m) > -1;
+        return el('button', { class: 'btn sm ' + (on ? 'primary' : 'ghost'), 'data-pay': m }, on ? [iconEl('check', 12), ' ' + m] : '+ ' + m);
+      })),
+      el('div', { class: 'modal-note' }, 'As formas marcadas aparecem no painel de pagamento da frente de caixa, na ordem em que foram ativadas.')
+    );
   }
 
   function categoryConfig() {
     var db = Store.db;
-    return '<div class="list-plain">' + db.categories.map(function (c) {
-      var n = db.products.filter(function (p) { return p.category === c.id; }).length;
-          return '<div class="list-item"><span class="thumb-emoji" style="background:' + esc(c.color) + '22">' + esc(c.emoji) + '</span>' +
-        '<span class="grow"><b>' + esc(c.name) + '</b><small>' + n + ' produto(s)</small></span>' +
-        '<button class="mini-btn danger" data-delcat="' + esc(c.id) + '" ' + (n ? 'disabled title="Há produtos nesta categoria"' : '') + '>' + icon('trash', 13) + '</button></div>';
-    }).join('') + '</div>' +
-    '<button class="btn block mt-2" data-newcat>' + icon('plus', 14) + ' Nova categoria</button>';
+    return frag(
+      el('div', { class: 'list-plain' }, db.categories.map(function (c) {
+        var n = db.products.filter(function (p) { return p.category === c.id; }).length;
+        var del = el('button', { class: 'mini-btn danger', 'data-delcat': c.id }, iconEl('trash', 13));
+        if (n) { del.disabled = true; del.title = 'Há produtos nesta categoria'; }
+        return el('div', { class: 'list-item' }, [
+          el('span', { class: 'thumb-emoji', style: { background: c.color + '22' } }, c.emoji),
+          el('span', { class: 'grow' }, [el('b', null, c.name), el('small', null, n + ' produto(s)')]),
+          del
+        ]);
+      })),
+      el('button', { class: 'btn block mt-2', 'data-newcat': '' }, [iconEl('plus', 14), ' Nova categoria'])
+    );
+  }
+
+  /* ---------- PREÇOS E PROMOÇÕES ---------- */
+  function priceTools() {
+    var db = Store.db;
+    var ativos = db.products.filter(function (p) { return p.active; }).length;
+    return frag(
+      el('p', { class: 'tiny muted', style: { margin: '0 0 10px' } }, [
+        'Ajuste o preço de venda em massa. Escolha ', el('b', null, 'aumentar'),
+        ' ou ', el('b', null, 'reduzir'), ' (promoção), em ', el('b', null, '%'),
+        ' ou em ', el('b', null, 'R$'), ', e aplique em todos os produtos ativos ou só nos selecionados. Cada produto alterado é enviado ao servidor.'
+      ]),
+      el('button', { class: 'btn primary block', 'data-price-tool': '' }, [iconEl('percent', 14), ' Ajustar preços (' + ativos + ' ativos)'])
+    );
+  }
+
+  function precoAjustado(atual, cfg) {
+    var delta = cfg.modo === 'pct' ? atual * (cfg.qtd / 100) : cfg.qtd;
+    var novo = UI.round2(cfg.op === 'aumentar' ? atual + delta : atual - delta);
+    return novo < 0.01 ? 0.01 : novo;
+  }
+
+  function priceAdjustTool() {
+    var db = Store.db;
+    var selecionados = {};
+    if (!db.products.some(function (p) { return p.active; })) { UI.toast('Nenhum produto ativo para ajustar.', 'warn'); return; }
+
+    function baseList(cat) {
+      return db.products.filter(function (p) { return p.active && (cat === 'all' || p.category === cat); });
+    }
+
+    var catOpts = [{ value: 'all', label: 'Todas as categorias' }].concat(
+      db.categories.map(function (c) { return { value: c.id, label: c.emoji + ' ' + c.name }; }));
+
+    /* Corpo montado com createElement: nome e preço do produto viram nós de
+       texto, então nada do cadastro entra como marcação. */
+    UI.modal({
+      title: 'Preços e promoções', icon: 'tag', size: 'lg',
+      body: frag(
+        el('div', { class: 'form-grid' }, [
+          UI.fieldEl('Operação', 'op', 'aumentar', { type: 'select', options: [
+            { value: 'aumentar', label: 'Aumentar preços' },
+            { value: 'reduzir', label: 'Reduzir preços (promoção)' }
+          ] }),
+          UI.fieldEl('Quanto', 'qtd', '', { type: 'money', step: '0.01', min: 0, placeholder: 'ex.: 10' }),
+          UI.fieldEl('Modo', 'modo', 'pct', { type: 'select', options: [
+            { value: 'pct', label: 'Percentual (%)' },
+            { value: 'valor', label: 'Valor fixo (R$)' }
+          ] }),
+          UI.fieldEl('Aplicar em', 'escopo', 'todos', { type: 'select', options: [
+            { value: 'todos', label: 'Todos os produtos do filtro' },
+            { value: 'selecionar', label: 'Apenas os selecionados abaixo' }
+          ] }),
+          UI.fieldEl('Filtrar por categoria', 'cat', 'all', { type: 'select', full: true, options: catOpts })
+        ]),
+        el('div', { class: 'modal-note', id: 'pricePreview' }, 'Digite o quanto quer aumentar ou reduzir.'),
+        el('div', {
+          id: 'priceList',
+          style: { display: 'none', 'max-height': '260px', overflow: 'auto', 'margin-top': '8px', border: '1px solid var(--line)', 'border-radius': 'var(--r-sm)' }
+        })
+      ),
+      confirmText: 'Aplicar aos preços',
+      onMount: function (root) {
+        var preview = root.querySelector('#pricePreview');
+        var listBox = root.querySelector('#priceList');
+
+        function cfg() {
+          var d = UI.formData(root);
+          return { op: d.op, modo: d.modo, qtd: UI.round2(UI.parseNum(d.qtd)), escopo: d.escopo, cat: d.cat };
+        }
+        function afetados(c) {
+          var base = baseList(c.cat);
+          if (c.escopo === 'selecionar') base = base.filter(function (p) { return selecionados[p.id]; });
+          return base.map(function (p) { return { p: p, novo: precoAjustado(p.price, c) }; });
+        }
+        function verPreview() {
+          var c = cfg();
+          if (c.qtd <= 0) { preview.textContent = 'Digite o quanto quer aumentar ou reduzir.'; return; }
+          var a = afetados(c);
+          if (!a.length) { preview.textContent = 'Nenhum produto no filtro/seleção atual.'; return; }
+          var ex = a[0];
+          var sinal = c.op === 'aumentar' ? '+' : '− ';
+          var quanto = c.modo === 'pct' ? UI.num(c.qtd) + '%' : money(c.qtd);
+          preview.textContent = a.length + ' produto(s) serão atualizados (' + sinal + quanto + ') · ex.: ' +
+            ex.p.name + ': ' + money(ex.p.price) + ' → ' + money(ex.novo);
+        }
+        function listar() {
+          var c = cfg();
+          if (c.escopo !== 'selecionar') { listBox.style.display = 'none'; UI.fill(listBox, null); return; }
+          var base = baseList(c.cat);
+          if (!base.length) { listBox.style.display = 'none'; UI.fill(listBox, null); return; }
+          listBox.style.display = 'block';
+          UI.fill(listBox, base.map(function (p) {
+            var box = el('input', { type: 'checkbox', class: 'price-pick', value: p.id });
+            if (selecionados[p.id]) box.setAttribute('checked', '');
+            box.addEventListener('change', function () {
+              if (box.checked) selecionados[p.id] = true; else delete selecionados[p.id];
+              verPreview();
+            });
+            return el('label', { style: { display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', gap: '10px', padding: '6px 8px', 'border-bottom': '1px solid var(--line)' } }, [
+              el('span', null, [box, ' ' + (p.emoji || '') + ' ' + p.name]),
+              el('b', { class: 'num' }, money(p.price))
+            ]);
+          }));
+        }
+        function tudo() { listar(); verPreview(); }
+        ['escopo', 'cat'].forEach(function (n) {
+          var f = root.querySelector('[name=' + n + ']');
+          if (f) f.addEventListener('change', tudo);
+        });
+        ['op', 'modo', 'qtd'].forEach(function (n) {
+          var f = root.querySelector('[name=' + n + ']');
+          if (f) { f.addEventListener('input', verPreview); f.addEventListener('change', verPreview); }
+        });
+        listar(); verPreview();
+      },
+      onConfirm: function (root) {
+        var d = UI.formData(root);
+        var c = { op: d.op, modo: d.modo, qtd: UI.round2(UI.parseNum(d.qtd)), escopo: d.escopo, cat: d.cat };
+        if (c.qtd <= 0) { UI.toast('Informe o quanto aumentar ou reduzir.', 'err'); return false; }
+        var base = baseList(c.cat);
+        if (c.escopo === 'selecionar') base = base.filter(function (p) { return selecionados[p.id]; });
+        if (!base.length) {
+          UI.toast(c.escopo === 'selecionar' ? 'Selecione ao menos um produto.' : 'Nenhum produto no filtro.', 'err');
+          return false;
+        }
+        base.forEach(function (p) {
+          p.price = precoAjustado(p.price, c);
+          Store.marcarCadastro('products', p);
+        });
+        Store.save();
+        rerender();
+        var sinal = c.op === 'aumentar' ? 'aumentados em ' : 'reduzidos em ';
+        var quanto = c.modo === 'pct' ? UI.num(c.qtd) + '%' : money(c.qtd);
+        UI.toast(base.length + ' preço(s) ' + sinal + quanto + '.', 'ok', 4500);
+      }
+    });
   }
 
   function usersBlock() {
     var db = Store.db;
     var me = Store.currentUser();
-    return db.auth.users.map(function (u) {
-      return '<div class="list-item"><span class="avatar">' + esc(u.name.slice(0, 2).toUpperCase()) + '</span>' +
-        '<span class="grow"><b>' + esc(u.name) + '</b><small>' + esc(u.username) + ' · ' + roleLabel(u) + (u.id === (me || {}).id ? ' · você' : '') + '</small></span>' +
-        (u.id === (me || {}).id ? '' : '<button class="mini-btn danger" data-deluser="' + esc(u.id) + '">' + icon('trash', 13) + '</button>') +
-        '</div>';
-    }).join('') +
-    '<button class="btn block mt-2" data-newuser>' + icon('plus', 14) + ' Novo usuário</button>' +
-    '<div class="modal-note" style="margin-top:11px">Perfis: <b>Administrador</b> (tudo) · <b>Gerente</b> (tudo menos usuários) · <b>Caixa</b> (só venda e clientes) · <b>Estoquista</b> (produtos e estoque).</div>';
+    return frag(
+      db.auth.users.map(function (u) {
+        return el('div', { class: 'list-item' }, [
+          el('span', { class: 'avatar' }, u.name.slice(0, 2).toUpperCase()),
+          el('span', { class: 'grow' }, [
+            el('b', null, u.name),
+            el('small', null, u.username + ' · ' + roleLabel(u) + (u.id === (me || {}).id ? ' · você' : ''))
+          ]),
+          u.id === (me || {}).id ? null : el('button', { class: 'mini-btn danger', 'data-deluser': u.id }, iconEl('trash', 13))
+        ]);
+      }),
+      el('button', { class: 'btn block mt-2', 'data-newuser': '' }, [iconEl('plus', 14), ' Novo usuário']),
+      el('button', { class: 'btn block mt-1', 'data-change-password': '' }, [iconEl('lock', 14), ' Trocar minha senha']),
+      el('div', { class: 'modal-note', style: { 'margin-top': '11px' } }, [
+        'Perfis: ', el('b', null, 'Administrador'), ' (tudo) · ', el('b', null, 'Gerente'),
+        ' (tudo menos usuários) · ', el('b', null, 'Caixa'), ' (só venda e clientes) · ',
+        el('b', null, 'Estoquista'), ' (produtos e estoque).'
+      ])
+    );
   }
 
   function dataBlock() {
     var servidor = (typeof API !== 'undefined' && API.status)
-      ? '<div class="divider" style="margin:6px 0"></div>' +
-        '<button class="btn block" data-migrar>' + icon('up', 14) + ' Migrar dados para o servidor</button>' +
-        '<button class="btn block" data-sync>' + icon('refresh', 14) + ' Sincronizar agora</button>' +
-        '<div class="modal-note mt-1" data-server-note>Verificando o servidor…</div>'
-      : '';
-    return '<div class="grid" style="gap:7px">' +
-      '<button class="btn block" onclick="UI.downloadBackup()">' + icon('down', 14) + ' Baixar backup (JSON)</button>' +
-      '<button class="btn block" data-import>' + icon('up', 14) + ' Restaurar backup</button>' +
-      '<button class="btn block" data-exportcsv>' + icon('down', 14) + ' Exportar produtos (CSV)</button>' +
-      servidor +
-      '<div class="divider" style="margin:6px 0"></div>' +
-      '<button class="btn block" data-seedenullish>' + icon('refresh', 14) + ' Recarregar catálogo de exemplo</button>' +
-      '<button class="btn block danger" data-reset>' + icon('trash', 14) + ' Apagar todos os dados</button>' +
-    '</div>' +
-    '<div class="modal-note mt-1">Sem servidor, os dados ficam <b>somente neste navegador</b> (teto de ~5 MB). Com o servidor ligado, todos os caixas leem a mesma base.</div>';
+      ? frag(
+          el('div', { class: 'divider', style: { margin: '6px 0' } }),
+          el('button', { class: 'btn block', 'data-migrar': '' }, [iconEl('up', 14), ' Migrar dados para o servidor']),
+          el('button', { class: 'btn block', 'data-sync': '' }, [iconEl('refresh', 14), ' Sincronizar agora']),
+          el('div', { class: 'modal-note mt-1', 'data-server-note': '' }, 'Verificando o servidor…'),
+          el('div', { class: 'modal-note mt-1', 'data-backup-note': '' }, 'Verificando backup automatico')
+        )
+      : null;
+    return frag(
+      el('div', { class: 'grid', style: { gap: '7px' } }, [
+        el('button', { class: 'btn block', onclick: function () { UI.downloadBackup(); } }, [iconEl('down', 14), ' Baixar backup (JSON)']),
+        el('button', { class: 'btn block', 'data-import': '' }, [iconEl('up', 14), ' Restaurar backup']),
+        el('button', { class: 'btn block', 'data-exportcsv': '' }, [iconEl('down', 14), ' Exportar produtos (CSV)']),
+        servidor,
+        el('div', { class: 'divider', style: { margin: '6px 0' } }),
+        el('button', { class: 'btn block', 'data-seedenullish': '' }, [iconEl('refresh', 14), ' Recarregar catálogo de exemplo']),
+        el('button', { class: 'btn block danger', 'data-reset': '' }, [iconEl('trash', 14), ' Apagar todos os dados'])
+      ]),
+      el('div', { class: 'modal-note mt-1' }, [
+        'Sem servidor, os dados ficam ', el('b', null, 'somente neste navegador'),
+        ' (teto de ~5 MB). Com o servidor ligado, todos os caixas leem a mesma base.'
+      ])
+    );
   }
 
   function newUser() {
@@ -1663,13 +2179,55 @@
         if (Store.db.auth.users.some(function (u) { return u.username.toLowerCase() === un; })) {
           UI.toast('Este usuário já existe.', 'err'); return false;
         }
-        Store.db.auth.users.push({
+        var usuarioLocal = {
           id: Store.uid('u'), name: d.name.trim(), username: un,
           passHash: Store.hashPass(String(d.pass)), role: d.role, active: true,
           createdAt: new Date().toISOString()
-        });
+        };
+        if (API.estado && API.estado.online) {
+          API.criarUsuario({ name: usuarioLocal.name, username: un, senha: String(d.pass), role: d.role })
+            .then(function (r) {
+              if (!r.ok) { UI.toast(r.erro || 'Nao foi possivel criar no servidor.', 'err', 5000); return; }
+              usuarioLocal.id = r.usuario.id;
+              Store.db.auth.users.push(usuarioLocal);
+              Store.save(); rerender();
+              UI.toast('Usuario criado no servidor e disponivel nos caixas.', 'ok');
+            });
+          return;
+        }
+        Store.db.auth.users.push(usuarioLocal);
         Store.save(); rerender();
-        UI.toast('Usuário criado.', 'ok');
+        UI.toast('Usuario criado neste computador.', 'ok');
+      }
+    });
+  }
+
+  function changePassword() {
+    UI.modal({
+      title: 'Trocar minha senha', icon: 'lock', size: 'sm',
+      body: '<div class="form-grid">' +
+        UI.field('Senha atual *', 'currentPassword', '', { type: 'password', full: true }) +
+        UI.field('Nova senha *', 'newPassword', '', { type: 'password', full: true, hint: 'mínimo de 12 caracteres' }) +
+        UI.field('Repetir nova senha *', 'confirmPassword', '', { type: 'password', full: true }) +
+        '</div>',
+      confirmText: 'Alterar senha',
+      onConfirm: function (root) {
+        var d = UI.formData(root);
+        if (!d.currentPassword) { UI.toast('Informe a senha atual.', 'err'); return false; }
+        if (typeof d.newPassword !== 'string' || d.newPassword.length < 12) {
+          UI.toast('A nova senha precisa ter pelo menos 12 caracteres.', 'err'); return false;
+        }
+        if (d.newPassword !== d.confirmPassword) { UI.toast('As novas senhas não conferem.', 'err'); return false; }
+        if (typeof API === 'undefined' || !API.alterarSenha) {
+          UI.toast('A troca de senha exige conexão com o servidor.', 'err'); return false;
+        }
+        API.alterarSenha(d.currentPassword, d.newPassword).then(function (r) {
+          if (!r.ok) { UI.toast(r.erro || 'Não foi possível alterar a senha.', 'err', 5000); return; }
+          var me = Store.currentUser();
+          if (me) me.passHash = Store.hashPass(d.newPassword);
+          Store.save();
+          UI.toast('Senha alterada. As outras sessões foram encerradas.', 'ok');
+        });
       }
     });
   }
@@ -1784,7 +2342,7 @@
     if (current === 'pdv') {
       shell.style.padding = '0';
       shell.style.overflow = 'hidden';
-      view.innerHTML = html;
+      pintar(view, html);
       try { PDV.bind(view); }
       catch (e2) {
         if (console) console.error('[app] falha ao ligar o PDV:', e2);
@@ -1793,7 +2351,7 @@
         return;
       }
     } else {
-      view.innerHTML = html;
+      pintar(view, html);
       try { bindView(view); }
       catch (e3) {
         if (console) console.error('[app] falha ao ligar a view "' + current + '":', e3);
@@ -1863,6 +2421,8 @@
       var t = e.target.closest('[data-ptab]');
       if (t) { Views.purchases._f.tab = t.dataset.ptab; rerender(); return; }
       if (e.target.closest('[data-newsup]')) { editSupplier(); return; }
+      var nps = e.target.closest('[data-newpc-supplier]');
+      if (nps) { newPurchase([], nps.dataset.newpcSupplier); return; }
       var es = e.target.closest('[data-editsup]');
       if (es) { editSupplier(es.dataset.editsup); return; }
       if (e.target.closest('[data-newpc]')) { newPurchase(); return; }
@@ -1948,8 +2508,11 @@
 
       var nu = e.target.closest('[data-newuser]');
       if (nu) { newUser(); return; }
+      if (e.target.closest('[data-change-password]')) { changePassword(); return; }
       var du = e.target.closest('[data-deluser]');
       if (du) { deleteUser(du.dataset.deluser); return; }
+
+      if (e.target.closest('[data-price-tool]')) { priceAdjustTool(); return; }
 
       if (e.target.closest('[data-import]')) { doImport(); return; }
       if (e.target.closest('[data-exportcsv]')) { exportProductsCSV(); return; }
@@ -1979,8 +2542,17 @@
       var rej = API.rejeitados ? API.rejeitados() : 0;
       notaServidor('Servidor <b>conectado</b>' +
         (API.estado.migrado ? ' · dados já migrados' : ' · ainda não migrados') +
+        (API.estado.caixasAbertos ? ' - ' + API.estado.caixasAbertos + ' caixa(s) aberto(s)' : '') +
         (p ? ' · <b>' + p + '</b> venda(s) na fila' : '') +
         (rej ? ' · <b style="color:#b42318">' + rej + '</b> recusado(s) pelo servidor' : ''));
+      if (API.backupStatus) API.backupStatus().then(function (b) {
+        var el = document.querySelector('[data-backup-note]'); if (!el) return;
+        if (!b || !b.ultimoArquivo) { el.textContent = 'Backup automatico ainda nao confirmado.'; return; }
+        var data = new Date(b.ultimoArquivo), horas = Math.floor((Date.now() - data.getTime()) / 3600000);
+        el.textContent = (b.falha ? 'Falha no backup: ' + b.falha : 'Ultimo backup integro: ' + data.toLocaleString('pt-BR')) +
+          ' - ' + b.quantidade + ' copias locais' + (b.espelhoAtivo ? ' - espelho externo: ' + b.copiasEspelho : ' - espelho externo nao configurado') +
+          (b.falhaEspelho ? ' - falha no espelho: ' + b.falhaEspelho : '') + (horas > 2 ? ' - ATENCAO: copia mais antiga que 2 horas' : '');
+      });
     }).catch(function () { notaServidor('Servidor não encontrado.'); });
   }
 
@@ -2072,6 +2644,12 @@
     } else if (which === 'fiscal') {
       cfg.pix.pixKey = UI.normalizePixKey(read('pixKey'));
       cfg.pix.city = read('pixCity');
+      cfg.municipalRegistration = read('municipalRegistration'); cfg.crt = read('crt');
+      cfg.cnae = read('cnae'); cfg.municipalityCode = read('municipalityCode');
+      cfg.zipCode = read('zipCode'); cfg.state = read('state').trim().toUpperCase().slice(0, 2);
+      cfg.city = read('city'); cfg.district = read('district');
+      cfg.addressNumber = read('addressNumber'); cfg.addressComplement = read('addressComplement');
+      cfg.fiscalPhone = read('fiscalPhone'); cfg.fiscalEmail = read('fiscalEmail');
     } else if (which === 'tema') {
       cfg.receiptFooter = read('receiptFooter');
       cfg.printWidth = Number(read('printWidth')) || 80;
@@ -2079,6 +2657,12 @@
       applyTheme(cfg.theme);
     }
     Store.save();
+    if (which !== 'tema' && typeof API !== 'undefined' && API.estado && API.estado.online && API.salvarConfig) {
+      var configRemota = Object.assign({}, cfg, { pix: { pixKey: cfg.pix.pixKey || '', city: cfg.pix.city || '' } });
+      API.salvarConfig(configRemota).then(function (r) {
+        if (!r.ok) UI.toast('Configuracao salva neste caixa, mas nao sincronizada com o servidor.', 'warn', 5000);
+      });
+    }
     UI.toast('Configurações salvas.', 'ok');
     rerender();
   }
@@ -2138,11 +2722,11 @@
   }
 
   function exportProductsCSV() {
-    var rows = [['Código', 'Código de barras', 'Nome', 'Categoria', 'Emoji', 'Custo', 'Preço', 'Margem %', 'Estoque', 'Mínimo', 'Unidade', 'Validade', 'Fornecedor', 'NCM', 'CFOP', 'CSOSN']];
+    var rows = [['Código', 'Código de barras', 'Nome', 'Categoria', 'Emoji', 'Custo', 'Preço', 'Margem %', 'Estoque', 'Mínimo', 'Unidade', 'Validade', 'Fornecedor', 'NCM', 'CFOP', 'CSOSN', 'CST ICMS', 'CST PIS', 'CST COFINS', 'CEST', 'Origem']];
     Store.db.products.forEach(function (p) {
       rows.push([p.code || '', p.barcode || '', p.name, p.category, p.emoji,
         UI.num(p.cost), UI.num(p.price), Store.marginOf(p), p.stock, p.min,
-        p.unit || 'un', p.expiry || '', p.supplier || '', p.ncm || '', p.cfop || '', p.csosn || '']);
+        p.unit || 'un', p.expiry || '', p.supplier || '', p.ncm || '', p.cfop || '', p.csosn || '', p.cst || '', p.pisCst || '', p.cofinsCst || '', p.cest || '', p.origin || '0']);
     });
     UI.downloadCSV('produtos.csv', rows);
     UI.toast('produtos.csv exportado. Use como modelo de importação.', 'ok');
@@ -2202,6 +2786,39 @@
     PDV.keys(e);
   }
 
+  /* ================= RECONCILIACAO DE CATALOGO =================
+   *
+   * O servidor decide preco e estoque; o local e copia de trabalho. Sem um
+   * ciclo proprio, dois caixas que mexem no mesmo produto fora do fluxo
+   * normal ficam divergentes ate alguem reparar. Roda a cada 5 min e tambem
+   * quando a aba volta a ficar visivel -- o caixa que saiu para o almoco
+   * volta com o estoque de agora, nao com o de duas horas atras.
+   */
+  var RECONCILIA_MS = 5 * 60 * 1000;
+  var reconciliacaoArmada = false;
+
+  function reconciliarCatalogo(avisar) {
+    if (!Store.currentUser() || !Store.reconciliarEstoque) return;
+    Store.reconciliarEstoque().then(function (r) {
+      if (!r || !r.ok || (!r.atualizados && !r.novos)) return;
+      /* Nao redesenha por baixo de um modal aberto: apagaria o que o operador
+         esta digitando. Fechado o modal, o proximo render ja pega o novo dado. */
+      if (!UI.modalAberto || !UI.modalAberto()) rerender();
+      if (avisar) {
+        UI.toast('Estoque atualizado pelo servidor: ' + (r.atualizados + r.novos) + ' produto(s).', 'info');
+      }
+    });
+  }
+
+  function armarReconciliacao() {
+    if (reconciliacaoArmada) return;
+    reconciliacaoArmada = true;
+    setInterval(function () { reconciliarCatalogo(false); }, RECONCILIA_MS);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) reconciliarCatalogo(false);
+    });
+  }
+
   /* ================= BOOT ================= */
   function start() {
     applyTheme(Store.db.config.theme);
@@ -2215,6 +2832,7 @@
     var initial = h && PAGES.some(function (p) { return p.id === h; }) ? h : (u.role === 'caixa' ? 'pdv' : 'dashboard');
     if (u.role === 'caixa' && initial !== 'pdv' && initial !== 'settings') initial = 'pdv';
     go(initial);
+    armarReconciliacao();
   }
 
   document.addEventListener('DOMContentLoaded', function () {

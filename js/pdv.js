@@ -7,6 +7,7 @@
   'use strict';
 
   var UI = global.UI, Store = global.Store, $ = UI.$, esc = UI.esc, money = UI.money, icon = UI.icon;
+  var el = UI.el, iconEl = UI.iconEl, frag = UI.frag;
 
   /* ---------------- estado da venda corrente ---------------- */
   var cart = [];
@@ -64,21 +65,43 @@
     });
   }
 
+  /* Devolve o NÓ do cartão. Nome, emoji, código e categoria entram como texto
+     (textContent), então nada digitado no cadastro consegue virar marcação. */
   function prodCard(p) {
     var out = p.stock <= 0;
     var low = !out && p.stock <= p.min;
     var stockTxt = out ? 'Esgotado' : (p.unit === 'kg' ? p.stock + ' kg' : p.stock + ' un');
-    return '<button class="v-prod" data-add="' + esc(p.id) + '"' + (out ? ' disabled' : '') + ' title="' + esc(p.name) + '">' +
-      '<span class="v-prod-info">' +
-          '<span class="v-prod-name"><span class="v-prod-emoji">' + esc(p.emoji) + '</span>' + esc(p.name) + '</span>' +
-        '<span class="v-prod-meta v-mono">' + esc(p.code || p.barcode || '') + '<em>·</em>' + esc(Store.categoryOf(p.category).name) + '</span>' +
-      '</span>' +
-      '<span class="v-prod-right">' +
-        '<span class="v-prod-price v-mono">' + money(p.price) + (p.unit === 'kg' ? '<em style="font-size:9px;font-weight:400;opacity:.55">/kg</em>' : '') + '</span>' +
-        '<span class="v-prod-add">' + icon('Plus', 11) + ' Adicionar</span>' +
-        '<span class="v-prod-stock ' + (out ? 'out' : low ? 'low' : '') + '">' + stockTxt + '</span>' +
-      '</span>' +
-    '</button>';
+    var card = el('button', { class: 'v-prod', 'data-add': p.id, title: p.name }, [
+      el('span', { class: 'v-prod-info' }, [
+        el('span', { class: 'v-prod-name' }, [
+          el('span', { class: 'v-prod-emoji' }, p.emoji),
+          p.name
+        ]),
+        el('span', { class: 'v-prod-meta v-mono' }, [
+          p.code || p.barcode || '',
+          el('em', null, '·'),
+          Store.categoryOf(p.category).name
+        ])
+      ]),
+      el('span', { class: 'v-prod-right' }, [
+        el('span', { class: 'v-prod-price v-mono' }, (function () {
+          var unidade = p.unit === 'kg'
+            ? el('em', { style: { 'font-size': '9px', 'font-weight': '400', opacity: '.55' } }, '/kg') : null;
+          if (!Store.promoVigente(p)) return [money(p.price), unidade];
+          return [
+            el('span', { style: { color: 'var(--accent-3)' } }, money(p.promoPrice)),
+            el('em', { style: { 'font-size': '9px', 'text-decoration': 'line-through', opacity: '.6', 'margin-left': '4px' } }, money(p.price)),
+            unidade
+          ];
+        })()),
+        el('span', { class: 'v-prod-add' }, [iconEl('Plus', 11), ' Adicionar']),
+        el('span', { class: 'v-prod-stock' }, stockTxt)
+      ])
+    ]);
+    var cls = 'v-prod-stock' + (out ? ' out' : low ? ' low' : '');
+    card.querySelector('.v-prod-stock').setAttribute('class', cls);
+    if (out) card.disabled = true;
+    return card;
   }
 
   function visibleProducts() {
@@ -99,11 +122,14 @@
     if (!g) return;
     var list = visibleProducts();
     if (!list.length) {
-      g.innerHTML = '<div class="empty"><span class="ico">' + icon('Search', 30) + '</span>' +
-        '<b>Nenhum produto encontrado</b>Ajuste a busca ou cadastre o produto.</div>';
+      UI.fill(g, el('div', { class: 'empty' }, [
+        el('span', { class: 'ico' }, iconEl('Search', 30)),
+        el('b', null, 'Nenhum produto encontrado'),
+        'Ajuste a busca ou cadastre o produto.'
+      ]));
       return;
     }
-    g.innerHTML = list.map(prodCard).join('');
+    UI.fill(g, list.map(prodCard));
   }
 
   function renderCategories() {
@@ -116,52 +142,60 @@
       counts[p.category] = (counts[p.category] || 0) + 1;
     });
     var nActive = db.products.filter(function (p) { return p.active; }).length;
-    bar.innerHTML =
-      '<button class="v-cat' + (activeCategory === 'all' ? ' active' : '') + '" data-cat="all">Todos <b>' + nActive + '</b></button>' +
-      db.categories.filter(function (c) { return counts[c.id]; }).map(function (c) {
-        return '<button class="v-cat' + (activeCategory === c.id ? ' active' : '') + '" data-cat="' + esc(c.id) + '">' +
-          esc(c.emoji) + ' ' + esc(c.name) + ' <b>' + counts[c.id] + '</b></button>';
-      }).join('');
+    var nodes = [el('button', { class: 'v-cat' + (activeCategory === 'all' ? ' active' : ''), 'data-cat': 'all' }, [
+      'Todos ', el('b', null, String(nActive))
+    ])];
+    db.categories.forEach(function (c) {
+      if (!counts[c.id]) return;
+      nodes.push(el('button', { class: 'v-cat' + (activeCategory === c.id ? ' active' : ''), 'data-cat': c.id }, [
+        c.emoji + ' ' + c.name + ' ',
+        el('b', null, String(counts[c.id]))
+      ]));
+    });
+    UI.fill(bar, nodes);
   }
 
   /* ---------------- carrinho ---------------- */
-  function cartLineHTML(item) {
+  function cartLineNode(item) {
     var p = Store.db.products.find(function (x) { return x.id === item.id; });
     var flagged = p && item.qty > p.stock;
-    return '<div class="v-line' + (flagged ? ' flagged' : '') + '">' +
-      '<span class="v-line-main">' +
-        '<span class="v-line-ico">' + icon('ShoppingBag', 15) + '</span>' +
-        '<span style="min-width:0">' +
-          '<span class="v-line-name">' + esc(item.name) + '</span>' +
-          '<span class="v-line-sub v-mono">' + money(item.price) + ' / ' + esc(item.unit || 'un') + '</span>' +
-        '</span>' +
-      '</span>' +
-      '<span class="v-line-right">' +
-        '<span class="v-qty">' +
-          '<button data-q="-1" data-id="' + esc(item.id) + '" aria-label="Diminuir">' + icon('Minus', 12) + '</button>' +
-          '<input type="text" inputmode="decimal" value="' + item.qty + '" data-qty="' + esc(item.id) + '" aria-label="Quantidade">' +
-          '<button data-q="1" data-id="' + esc(item.id) + '" aria-label="Aumentar">' + icon('Plus', 12) + '</button>' +
-        '</span>' +
-        '<span class="v-line-total v-mono">' + money(item.price * item.qty) + '</span>' +
-        '<span style="display:flex;flex-direction:column;gap:2px">' +
-          (p && p.unit === 'kg' ? '<button class="v-del" data-weight="' + esc(item.id) + '" title="Definir peso (kg)">' + icon('Scale', 13) + '</button>' : '') +
-          '<button class="v-del" data-del="' + esc(item.id) + '" title="Remover">' + icon('Trash2', 14) + '</button>' +
-        '</span>' +
-        '<span class="v-tools">' +
-          '<button data-price="' + esc(item.id) + '" title="Alterar preço">' + icon('Tag', 12) + '</button>' +
-        '</span>' +
-      '</span>' +
-    '</div>';
+    return el('div', { class: 'v-line' + (flagged ? ' flagged' : '') }, [
+      el('span', { class: 'v-line-main' }, [
+        el('span', { class: 'v-line-ico' }, iconEl('ShoppingBag', 15)),
+        el('span', { style: { 'min-width': '0' } }, [
+          el('span', { class: 'v-line-name' }, item.name),
+          el('span', { class: 'v-line-sub v-mono' }, [money(item.price) + ' / ' + (item.unit || 'un')])
+        ])
+      ]),
+      el('span', { class: 'v-line-right' }, [
+        el('span', { class: 'v-qty' }, [
+          el('button', { 'data-q': '-1', 'data-id': item.id, 'aria-label': 'Diminuir' }, iconEl('Minus', 12)),
+          el('input', { type: 'text', inputmode: 'decimal', value: item.qty, 'data-qty': item.id, 'aria-label': 'Quantidade' }),
+          el('button', { 'data-q': '1', 'data-id': item.id, 'aria-label': 'Aumentar' }, iconEl('Plus', 12))
+        ]),
+        el('span', { class: 'v-line-total v-mono' }, money(item.price * item.qty)),
+        el('span', { style: { display: 'flex', 'flex-direction': 'column', gap: '2px' } }, [
+          p && p.unit === 'kg' ? el('button', { class: 'v-del', 'data-weight': item.id, title: 'Definir peso (kg)' }, iconEl('Scale', 13)) : null,
+          el('button', { class: 'v-del', 'data-del': item.id, title: 'Remover' }, iconEl('Trash2', 14))
+        ]),
+        el('span', { class: 'v-tools' }, [
+          el('button', { 'data-price': item.id, title: 'Alterar preço' }, iconEl('Tag', 12))
+        ])
+      ])
+    ]);
   }
 
   function renderCart() {
     var box = $('#cartList');
     if (!box) return;
     if (!cart.length) {
-      box.innerHTML = '<div class="empty"><span class="ico">' + icon('ShoppingCart', 28) + '</span>' +
-        '<b>Carrinho vazio</b>Escaneie um código ou toque em "Adicionar".</div>';
+      UI.fill(box, el('div', { class: 'empty' }, [
+        el('span', { class: 'ico' }, iconEl('ShoppingCart', 28)),
+        el('b', null, 'Carrinho vazio'),
+        'Escaneie um código ou toque em "Adicionar".'
+      ]));
     } else {
-      box.innerHTML = cart.map(cartLineHTML).join('');
+      UI.fill(box, cart.map(cartLineNode));
     }
     var c = $('#cartCount');
     if (c) c.textContent = itemCount() + (itemCount() === 1 ? ' item' : ' itens') + ' no carrinho';
@@ -179,15 +213,15 @@
     var t = $('#totalsBox');
     if (!t) return;
     var sub = subtotal(), d = discountValue();
-    t.innerHTML =
-      '<div class="v-sum-row"><span>Subtotal</span><b class="v-mono">' + money(sub) + '</b></div>' +
-      (d > 0 ? '<div class="v-sum-row disc"><span>Desconto</span><b class="v-mono">− ' + money(d) + '</b></div>' : '') +
-      (creditPart() > 0 ? '<div class="v-sum-row"><span>Crediário</span><b class="v-mono">' + money(creditPart()) + '</b></div>' : '') +
-      '<div class="v-sum-row"><span>Itens</span><b class="v-mono">' + itemCount() + '</b></div>' +
-      '<div class="v-total">' +
-        '<div class="v-total-lbl">Total a pagar</div>' +
-        '<div class="v-total-val v-mono">' + money(total()) + '</div>' +
-      '</div>';
+    var rows = [el('div', { class: 'v-sum-row' }, [el('span', null, 'Subtotal'), el('b', { class: 'v-mono' }, money(sub))])];
+    if (d > 0) rows.push(el('div', { class: 'v-sum-row disc' }, [el('span', null, 'Desconto'), el('b', { class: 'v-mono' }, '− ' + money(d))]));
+    if (creditPart() > 0) rows.push(el('div', { class: 'v-sum-row' }, [el('span', null, 'Crediário'), el('b', { class: 'v-mono' }, money(creditPart()))]));
+    rows.push(el('div', { class: 'v-sum-row' }, [el('span', null, 'Itens'), el('b', { class: 'v-mono' }, String(itemCount()))]));
+    rows.push(el('div', { class: 'v-total' }, [
+      el('div', { class: 'v-total-lbl' }, 'Total a pagar'),
+      el('div', { class: 'v-total-val v-mono' }, money(total()))
+    ]));
+    UI.fill(t, rows);
 
     var dInput = $('#discInput');
     if (dInput && document.activeElement !== dInput) dInput.value = d > 0 ? String(d).replace('.', ',') : '';
@@ -199,10 +233,11 @@
     var methods = Store.db.config.paymentMethods || [];
     var box = $('#payMethods');
     if (box) {
-      box.innerHTML = methods.map(function (m) {
-        return '<button class="v-pay-m' + (payMethod === m ? ' active' : '') + '" data-method="' + esc(m) + '">' +
-          icon(PAY_ICON[m] || 'CreditCard', 14) + '<span>' + esc(m) + '</span></button>';
-      }).join('');
+      UI.fill(box, methods.map(function (m) {
+        return el('button', { class: 'v-pay-m' + (payMethod === m ? ' active' : ''), 'data-method': m }, [
+          iconEl(PAY_ICON[m] || 'CreditCard', 14), el('span', null, m)
+        ]);
+      }));
     }
 
     var cash = $('#quickCash');
@@ -212,9 +247,9 @@
       [5, 10, 20, 50, 100].forEach(function (v) { if (t > 0 && v >= Math.ceil(t)) opts.push(v); });
       if (t > 0) opts.push(Math.ceil(t));
       opts = opts.filter(function (v, i, a) { return a.indexOf(v) === i; }).slice(0, 5);
-      cash.innerHTML = opts.map(function (v) {
-        return '<button data-cash="' + v + '">' + money(v) + '</button>';
-      }).join('');
+      UI.fill(cash, opts.map(function (v) {
+        return el('button', { 'data-cash': v }, money(v));
+      }));
       cash.style.display = payMethod === 'Dinheiro' && t > 0 ? 'grid' : 'none';
     }
 
@@ -226,11 +261,15 @@
 
     var parts = $('#payParts');
     if (parts) {
-      parts.innerHTML = payParts.map(function (p, i) {
-        return '<div class="v-part"><span>' + esc(p.method) + '</span>' +
-          '<span style="display:flex;align-items:center;gap:6px"><b class="v-mono">' + money(p.amount) + '</b>' +
-          '<button class="v-del" data-rmpay="' + i + '">' + icon('X', 12) + '</button></span></div>';
-      }).join('');
+      UI.fill(parts, payParts.map(function (p, i) {
+        return el('div', { class: 'v-part' }, [
+          el('span', null, p.method),
+          el('span', { style: { display: 'flex', 'align-items': 'center', gap: '6px' } }, [
+            el('b', { class: 'v-mono' }, money(p.amount)),
+            el('button', { class: 'v-del', 'data-rmpay': String(i) }, iconEl('X', 12))
+          ])
+        ]);
+      }));
     }
 
     renderChange();
@@ -248,8 +287,10 @@
     var t = total();
     var ready = t > 0 && payParts.reduce(function (a, p) { return a + p.amount; }, 0) + UI.parseNum(payInput) >= t - 0.001;
     box.className = 'v-change' + (ready ? ' ready' : '');
-    box.innerHTML = '<span>' + (ready ? 'Troco' : 'Falta receber') + '</span>' +
-      '<b class="v-mono">' + money(ready ? changeDue() : remaining()) + '</b>';
+    UI.fill(box, [
+      el('span', null, ready ? 'Troco' : 'Falta receber'),
+      el('b', { class: 'v-mono' }, money(ready ? changeDue() : remaining()))
+    ]);
   }
 
   function renderCustomer() {
@@ -278,17 +319,22 @@
     }
     UI.modal({
       title: 'Identificar cliente', icon: 'UserPlus', size: 'sm',
-      body: '<div class="list-plain">' +
-        '<button class="list-item" data-pick="" style="text-align:left">' +
-          '<span class="thumb-emoji">' + icon('X', 15) + '</span>' +
-          '<span class="grow"><b>Consumidor não identificado</b><small>Venda avulsa, sem crediário</small></span></button>' +
-        db.customers.map(function (c) {
-          var lim = Number(c.debtLimit) || 0;
-          return '<button class="list-item" data-pick="' + esc(c.id) + '" style="text-align:left">' +
-            '<span class="avatar">' + esc(c.name.slice(0, 2).toUpperCase()) + '</span>' +
-            '<span class="grow"><b>' + esc(c.name) + '</b><small>' + esc(c.phone || 'sem telefone') +
-            (c.debt ? ' · deve ' + money(c.debt) : '') + (lim ? ' · limite ' + money(lim) : '') + '</small></span></button>';
-        }).join('') + '</div>',
+      body: el('div', { class: 'list-plain' }, [
+        el('button', { class: 'list-item', 'data-pick': '', style: { 'text-align': 'left' } }, [
+          el('span', { class: 'thumb-emoji' }, iconEl('X', 15)),
+          el('span', { class: 'grow' }, [
+            el('b', null, 'Consumidor não identificado'),
+            el('small', null, 'Venda avulsa, sem crediário')
+          ])
+        ])
+      ].concat(db.customers.map(function (c) {
+        var lim = Number(c.debtLimit) || 0;
+        var sub = (c.phone || 'sem telefone') + (c.debt ? ' · deve ' + money(c.debt) : '') + (lim ? ' · limite ' + money(lim) : '');
+        return el('button', { class: 'list-item', 'data-pick': c.id, style: { 'text-align': 'left' } }, [
+          el('span', { class: 'avatar' }, c.name.slice(0, 2).toUpperCase()),
+          el('span', { class: 'grow' }, [el('b', null, c.name), el('small', null, sub)])
+        ]);
+      }))),
       onMount: function (root, close) {
         root.addEventListener('click', function (e) {
           var b = e.target.closest('[data-pick]');
@@ -326,7 +372,7 @@
       }
       line.qty += 1;
     } else {
-      cart.push({ id: p.id, name: p.name, emoji: p.emoji, price: Number(p.price), cost: Number(p.cost), qty: 1, unit: p.unit });
+      cart.push({ id: p.id, name: p.name, emoji: p.emoji, price: Store.precoVigente(p), cost: Number(p.cost), qty: 1, unit: p.unit });
     }
     productQuery = '';
     var inp = $('#pdvSearch');
@@ -465,7 +511,7 @@
     };
     cart.forEach(function (i) {
       var p = db.products.find(function (x) { return x.id === i.id; });
-      if (p) antes.estoque.push({ p: p, stock: p.stock });
+      if (p) antes.estoque.push({ p: p, stock: p.stock, stockDeposit: p.stockDeposit, stockSales: p.stockSales });
     });
 
     var sale = {
@@ -481,14 +527,25 @@
       customerId: customerId || null,
       customerName: customer ? customer.name : null,
       items: cart.map(function (i) { return { id: i.id, name: i.name, emoji: i.emoji, price: i.price, cost: i.cost, qty: i.qty, unit: i.unit }; }),
-      payments: parts.map(function (p) { return { method: p.method, amount: p.amount }; }),
+      payments: parts.map(function (p) {
+        var formaNormalizada = String(p.method).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        var externo = formaNormalizada === 'Pix' || formaNormalizada === 'Debito' || formaNormalizada === 'Credito';
+        return { method: p.method, amount: p.amount, confirmedBy: externo && u ? u.name : null, confirmedById: externo && u ? u.id : null, confirmedAt: externo ? new Date().toISOString() : null };
+      }),
       status: 'Concluída'
     };
 
     // baixa de estoque
     sale.items.forEach(function (i) {
       var p = db.products.find(function (x) { return x.id === i.id; });
-      if (p) p.stock = Math.round((p.stock - i.qty) * 1000) / 1000;
+      if (p) {
+        if (p.stockSales != null || p.stockDeposit != null) {
+          var sala = Math.max(0, Number(p.stockSales) || 0), baixa = Math.min(sala, i.qty);
+          p.stockSales = Math.round((sala - baixa) * 1000) / 1000;
+          if (p.stockDeposit != null) p.stockDeposit = Math.round(((Number(p.stockDeposit) || 0) - (i.qty - baixa)) * 1000) / 1000;
+        }
+        p.stock = Math.round((p.stock - i.qty) * 1000) / 1000;
+      }
     });
 
     // crediário
@@ -538,7 +595,7 @@
         db.shift.sales.length = antes.turnoVendas;
         db.shift.cashExpected = antes.esperadoCaixa;
       }
-      antes.estoque.forEach(function (r) { r.p.stock = r.stock; });
+      antes.estoque.forEach(function (r) { r.p.stock = r.stock; r.p.stockDeposit = r.stockDeposit; r.p.stockSales = r.stockSales; });
       if (customer) { customer.debt = antes.divida; customer.points = antes.pontos; }
     });
 
@@ -599,8 +656,9 @@
     UI.confirm({
       title: 'Venda #' + id + ' registrada', kind: 'ok', confirmText: 'Imprimir cupom',
       html: 'Total <strong>' + money(totalV) + '</strong> · ' + sale.items.length + ' itens' +
-        (change > 0 ? '<br>Troco <strong>' + money(change) + '</strong>' : '')
-    }).then(function (print) { if (print) printReceipt(id); });
+        (change > 0 ? '<br>Troco <strong>' + money(change) + '</strong>' : ''),
+      onConfirm: function () { printReceipt(id); }
+    });
   }
 
   /* ---------------- estorno ---------------- */
@@ -683,11 +741,14 @@
     UI.modal({
       title: type === 'Entrada' ? 'Suprimento de caixa' : 'Sangria de caixa',
       icon: type === 'Entrada' ? 'up' : 'down', size: 'sm',
-      body: '<div class="form-grid">' +
-        UI.field('Valor (R$)', 'amount', '', { type: 'money', step: '0.01', min: 0, placeholder: '0,00' }) +
-        UI.field('Motivo', 'reason', '', { placeholder: type === 'Entrada' ? 'Ex.: troco inicial' : 'Ex.: pagar fornecedor', full: true }) +
-        '</div>' +
-        (type === 'Entrada' ? '' : '<div class="modal-note warn">Sangrias são registradas na auditoria do turno. Informe o motivo com clareza.</div>'),
+      body: frag(
+        el('div', { class: 'form-grid' }, [
+          UI.fieldEl('Valor (R$)', 'amount', '', { type: 'money', step: '0.01', min: 0, placeholder: '0,00' }),
+          UI.fieldEl('Motivo', 'reason', '', { placeholder: type === 'Entrada' ? 'Ex.: troco inicial' : 'Ex.: pagar fornecedor', full: true })
+        ]),
+        type === 'Entrada' ? null : el('div', { class: 'modal-note warn' },
+          'Sangrias são registradas na auditoria do turno. Informe o motivo com clareza.')
+      ),
       confirmText: type === 'Entrada' ? 'Registrar suprimento' : 'Registrar sangria',
       danger: type === 'Saída',
       onConfirm: function (root) {
@@ -729,12 +790,16 @@
     UI.modal({
       title: 'Vendas suspensas', icon: 'layers', size: 'sm',
       body: held.map(function (h) {
-        return '<div class="list-item"><span class="thumb-emoji">' + icon('cart2', 17) + '</span>' +
-          '<span class="grow"><b>' + h.items.length + ' itens · ' + money(h.total) + '</b>' +
-          '<small>' + UI.dt(h.date) + '</small></span>' +
-          '<button class="btn sm primary" data-resume="' + esc(h.id) + '">Retomar</button>' +
-          '<button class="btn sm danger" data-drop="' + esc(h.id) + '">Descartar</button></div>';
-      }).join(''),
+        return el('div', { class: 'list-item' }, [
+          el('span', { class: 'thumb-emoji' }, iconEl('cart2', 17)),
+          el('span', { class: 'grow' }, [
+            el('b', null, h.items.length + ' itens · ' + money(h.total)),
+            el('small', null, UI.dt(h.date))
+          ]),
+          el('button', { class: 'btn sm primary', 'data-resume': h.id }, 'Retomar'),
+          el('button', { class: 'btn sm danger', 'data-drop': h.id }, 'Descartar')
+        ]);
+      }),
       onMount: function (root) {
         root.addEventListener('click', function (e) {
           var r = e.target.closest('[data-resume]'), dr = e.target.closest('[data-drop]');
@@ -864,18 +929,31 @@
     return new Promise(function (resolve) {
       UI.modal({
         title: 'Abrir caixa', icon: 'wallet', size: 'sm',
-        body: '<div class="modal-note">O fundo de caixa é a quantia inicial no gaveteiro. Ela será usada como base na conferência do fechamento.</div>' +
-          '<div class="form-grid mt-2">' +
-          UI.field('Fundo inicial (R$)', 'opening', db.config.cashOpening || 0, { type: 'money', step: '0.01', min: 0, full: true }) +
-          '</div>',
+        body: frag(
+          el('div', { class: 'modal-note' }, 'O fundo de caixa é a quantia inicial no gaveteiro. Ela será usada como base na conferência do fechamento.'),
+          el('div', { class: 'form-grid mt-2' }, [
+            UI.fieldEl('Fundo inicial (R$)', 'opening', db.config.cashOpening || 0, { type: 'money', step: '0.01', min: 0, full: true })
+          ])
+        ),
         confirmText: 'Abrir caixa',
+        onMount: function (root, close) { root._closeShiftOpen = close; },
         onConfirm: function (root) {
-          var d = UI.formData(root);
-          Store.openShift(UI.parseNum(d.opening));
-          global.App.rerender();
-          global.App.refreshShiftUI();
-          UI.toast('Caixa aberto com fundo de ' + money(UI.parseNum(d.opening)) + '.', 'ok');
-          resolve(true);
+          var d = UI.formData(root), opening = UI.parseNum(d.opening);
+          var finish = function (turno) {
+            Store.openShift(opening, turno || null);
+            global.App.rerender(); global.App.refreshShiftUI();
+            UI.toast('Caixa aberto com fundo de ' + money(opening) + '.', 'ok');
+            resolve(true); root._closeShiftOpen();
+          };
+          if (API.estado && API.estado.online && API.abrirTurno) {
+            API.abrirTurno(Store.uid('sh'), opening).then(function (r) {
+              if (!r.ok) { UI.toast(r.erro, 'err', 6000); return; }
+              finish(r.turno);
+            });
+            return false;
+          }
+          finish(null);
+          return false;
         },
         onClose: function () { resolve(false); }
       });
@@ -889,92 +967,95 @@
     if (methods.indexOf(payMethod) === -1) payMethod = methods[0] || 'Dinheiro';
     var active = db.products.filter(function (p) { return p.active; }).length;
 
-    return '' +
-    /* ================= COLUNA 1 · CATÁLOGO ================= */
-    '<div class="v-col">' +
-      '<div class="v-col-head">' +
-        '<span class="v-label">Catálogo</span>' +
-        '<span class="v-count v-mono">' + active + ' produtos</span>' +
-      '</div>' +
-      '<div class="v-search">' +
-        '<div class="v-search-box">' + icon('Search', 15) +
-          '<input id="pdvSearch" placeholder="Código de barras ou nome" autocomplete="off" autofocus>' +
-          '<span class="v-kbd">F2</span>' +
-        '</div>' +
-      '</div>' +
-      '<div class="v-cats" id="pdvCats"></div>' +
-      '<div class="v-list" id="pdvGrid"></div>' +
-    '</div>' +
+    return frag(
+      /* ================= COLUNA 1 · CATÁLOGO ================= */
+      el('div', { class: 'v-col' }, [
+        el('div', { class: 'v-col-head' }, [
+          el('span', { class: 'v-label' }, 'Catálogo'),
+          el('span', { class: 'v-count v-mono' }, active + ' produtos')
+        ]),
+        el('div', { class: 'v-search' }, el('div', { class: 'v-search-box' }, [
+          iconEl('Search', 15),
+          el('input', { id: 'pdvSearch', placeholder: 'Código de barras ou nome', autocomplete: 'off', autofocus: '' }),
+          el('span', { class: 'v-kbd' }, 'F2')
+        ])),
+        el('div', { class: 'v-cats', id: 'pdvCats' }),
+        el('div', { class: 'v-list', id: 'pdvGrid' })
+      ]),
 
-    /* ================= COLUNA 2 · VENDA EM ANDAMENTO ================= */
-    '<div class="v-col">' +
-      '<div class="v-col-head">' +
-        '<div><div class="v-label">Venda em andamento</div>' +
-        '<div class="v-label-sub" id="cartCount">0 itens no carrinho</div></div>' +
-        '<span class="v-count v-mono" id="saleNum">#—</span>' +
-      '</div>' +
-      '<div class="v-cart" id="cartList"></div>' +
-      '<div class="v-hotkeys">' +
-        '<button class="v-hk" id="btnClear" title="Cancelar venda">' + icon('Tag', 13) + '<b>F1</b> Desconto</button>' +
-        '<button class="v-hk" id="btnFocus" title="Focar busca">' + icon('Search', 13) + '<b>F2</b> Busca</button>' +
-        '<button class="v-hk" id="btnHold" title="Suspender venda">' + icon('Pause', 13) + '<b>F3</b> Suspender</button>' +
-        '<button class="v-hk" id="btnCancel" title="Cancelar venda">' + icon('X', 13) + '<b>F4</b> Cancelar</button>' +
-      '</div>' +
-    '</div>' +
+      /* ================= COLUNA 2 · VENDA EM ANDAMENTO ================= */
+      el('div', { class: 'v-col' }, [
+        el('div', { class: 'v-col-head' }, [
+          el('div', null, [
+            el('div', { class: 'v-label' }, 'Venda em andamento'),
+            el('div', { class: 'v-label-sub', id: 'cartCount' }, '0 itens no carrinho')
+          ]),
+          el('span', { class: 'v-count v-mono', id: 'saleNum' }, '#—')
+        ]),
+        el('div', { class: 'v-cart', id: 'cartList' }),
+        el('div', { class: 'v-hotkeys' }, [
+          el('button', { class: 'v-hk', id: 'btnClear', title: 'Cancelar venda' }, [iconEl('Tag', 13), el('b', null, 'F1'), ' Desconto']),
+          el('button', { class: 'v-hk', id: 'btnFocus', title: 'Focar busca' }, [iconEl('Search', 13), el('b', null, 'F2'), ' Busca']),
+          el('button', { class: 'v-hk', id: 'btnHold', title: 'Suspender venda' }, [iconEl('Pause', 13), el('b', null, 'F3'), ' Suspender']),
+          el('button', { class: 'v-hk', id: 'btnCancel', title: 'Cancelar venda' }, [iconEl('X', 13), el('b', null, 'F4'), ' Cancelar'])
+        ])
+      ]),
 
-    /* ================= COLUNA 3 · RESUMO E PAGAMENTO ================= */
-    '<div class="v-col">' +
-      '<div class="v-pay">' +
-        '<div class="v-sum-head"><span class="v-label">Resumo</span>' + icon('Package', 15, 1.6) + '</div>' +
-        '<div id="totalsBox"></div>' +
-
-        '<div class="v-disc-row">' +
-          '<input id="discInput" inputmode="decimal" placeholder="Desconto R$ 0,00" title="Desconto (F1)">' +
-          '<button class="v-quick" id="btnMaxDisc" style="padding:0 11px;font-size:11px">Máx</button>' +
-        '</div>' +
-
-        '<span class="v-pay-lbl">Forma de pagamento</span>' +
-        '<div class="v-pays" id="payMethods"></div>' +
-        '<div class="v-quick" id="quickCash" style="display:none"></div>' +
-
-        '<div class="v-cash-row">' +
-          '<input id="payInput" inputmode="decimal" placeholder="0,00">' +
-          '<button id="btnAddPart" title="Adicionar forma de pagamento">' + icon('Plus', 16) + '</button>' +
-        '</div>' +
-        '<div class="change-box" id="changeBox"></div>' +
-        '<div class="pay-parts" id="payParts"></div>' +
-
-        '<div class="row tight" style="gap:6px;margin-top:9px">' +
-          '<button class="v-hk" id="btnExact" style="flex:1">' + icon('CheckCircle', 13) + ' Pagar exato</button>' +
-          '<button class="v-hk" id="btnPix" style="flex:1">' + icon('QrCode', 13) + ' Pix QR</button>' +
-        '</div>' +
-
-        '<button class="v-cust" id="btnCustomer">' +
-          '<span>' + icon('UserPlus', 15) + ' <b id="custName">Cliente</b></span><em id="custHint">Identificar</em>' +
-        '</button>' +
-
-        '<button class="v-finish" id="btnCheckout" disabled>' + icon('CheckCircle', 16) + ' Finalizar venda</button>' +
-        '<div class="v-finish-hint">F9 ou Enter · confirmar pagamento</div>' +
-      '</div>' +
-    '</div>';
+      /* ================= COLUNA 3 · RESUMO E PAGAMENTO ================= */
+      el('div', { class: 'v-col' }, [
+        el('div', { class: 'v-pay' }, [
+          el('div', { class: 'v-sum-head' }, [el('span', { class: 'v-label' }, 'Resumo'), iconEl('Package', 15, 1.6)]),
+          el('div', { id: 'totalsBox' }),
+          el('div', { class: 'v-disc-row' }, [
+            el('input', { id: 'discInput', inputmode: 'decimal', placeholder: 'Desconto R$ 0,00', title: 'Desconto (F1)' }),
+            el('button', { class: 'v-quick', id: 'btnMaxDisc', style: { padding: '0 11px', 'font-size': '11px' } }, 'Máx')
+          ]),
+          el('span', { class: 'v-pay-lbl' }, 'Forma de pagamento'),
+          el('div', { class: 'v-pays', id: 'payMethods' }),
+          el('div', { class: 'v-quick', id: 'quickCash', style: { display: 'none' } }),
+          el('div', { class: 'v-cash-row' }, [
+            el('input', { id: 'payInput', inputmode: 'decimal', placeholder: '0,00' }),
+            el('button', { id: 'btnAddPart', title: 'Adicionar forma de pagamento' }, iconEl('Plus', 16))
+          ]),
+          el('div', { class: 'change-box', id: 'changeBox' }),
+          el('div', { class: 'pay-parts', id: 'payParts' }),
+          el('div', { class: 'row tight', style: { gap: '6px', 'margin-top': '9px' } }, [
+            el('button', { class: 'v-hk', id: 'btnExact', style: { flex: '1' } }, [iconEl('CheckCircle', 13), ' Pagar exato']),
+            el('button', { class: 'v-hk', id: 'btnPix', style: { flex: '1' } }, [iconEl('QrCode', 13), ' Pix QR'])
+          ]),
+          el('button', { class: 'v-cust', id: 'btnCustomer' }, [
+            el('span', null, [iconEl('UserPlus', 15), ' ', el('b', { id: 'custName' }, 'Cliente')]),
+            el('em', { id: 'custHint' }, 'Identificar')
+          ]),
+          el('button', { class: 'v-finish', id: 'btnCheckout', disabled: true }, [iconEl('CheckCircle', 16), ' Finalizar venda']),
+          el('div', { class: 'v-finish-hint' }, 'F9 ou Enter · confirmar pagamento')
+        ])
+      ])
+    );
   }
 
   /* Envolve o PDV no grid de 3 colunas + barra de atalhos, e liga o tema Vértice. */
   function renderWrapped() {
     document.body.classList.add('vertice');
-    var html =
-      '<div class="v-grid">' + render() + '</div>' +
-      '<div class="v-bar">' +
-        '<span>' + icon('Lock', 11) + ' <b>' + esc(Store.db.shift ? Store.db.shift.operator : 'Caixa fechado') + '</b></span>' +
-        '<span><b>F1</b> Desconto</span><span><b>F2</b> Focar leitor</span>' +
-        '<span><b>F5</b> Cliente</span><span><b>F6</b> Suspender</span>' +
-        '<span><b>F7</b> Trocar método</span><span><b>F8</b> Valor recebido</span>' +
-        '<span><b>F9</b> Finalizar</span><span><b>F10</b> Cupom</span><span><b>F11</b> Balança</span>' +
-        (Store.db.heldSales.length
-          ? '<span>' + icon('Pause', 10) + ' <b id="heldInfo">' + Store.db.heldSales.length + '</b> suspensa(s)</span>' : '') +
-        '<span class="right"><span class="dot"></span> MODO CAIXA</span>' +
-      '</div>';
-    return html;
+    return frag(
+      el('div', { class: 'v-grid' }, render()),
+      el('div', { class: 'v-bar' }, [
+        el('span', null, [iconEl('Lock', 11), ' ', el('b', null, Store.db.shift ? Store.db.shift.operator : 'Caixa fechado')]),
+        el('span', null, [el('b', null, 'F1'), ' Desconto']),
+        el('span', null, [el('b', null, 'F2'), ' Focar leitor']),
+        el('span', null, [el('b', null, 'F5'), ' Cliente']),
+        el('span', null, [el('b', null, 'F6'), ' Suspender']),
+        el('span', null, [el('b', null, 'F7'), ' Trocar método']),
+        el('span', null, [el('b', null, 'F8'), ' Valor recebido']),
+        el('span', null, [el('b', null, 'F9'), ' Finalizar']),
+        el('span', null, [el('b', null, 'F10'), ' Cupom']),
+        el('span', null, [el('b', null, 'F11'), ' Balança']),
+        Store.db.heldSales.length
+          ? el('span', null, [iconEl('Pause', 10), ' ', el('b', { id: 'heldInfo' }, String(Store.db.heldSales.length)), ' suspensa(s)'])
+          : null,
+        el('span', { class: 'right' }, [el('span', { class: 'dot' }), ' MODO CAIXA'])
+      ])
+    );
   }
 
   function unwrap() { document.body.classList.remove('vertice'); }
@@ -1122,10 +1203,19 @@
     var payload = UI.pixPayload(amount, txid);
     UI.modal({
       title: 'Pix — ' + money(amount), icon: 'pix', size: 'sm', footer: false,
-      body: '<div class="pix-card"><div class="pix-qr" id="pixQrBox"></div>' +
-        '<div class="small muted" style="margin-bottom:8px">O cliente escaneia e paga. Confirme o crédito no app bancário antes de finalizar.</div>' +
-        '<button class="btn primary block" id="btnCopyPix">' + icon('copy', 15) + ' Copiar Pix copia e cola</button></div>' +
-        '<div class="modal-note">' + icon('info', 12) + ' Configure a chave Pix em <b>Configurações → Fiscal</b>. O QR é estático: serve para qualquer valor.</div>',
+      body: frag(
+        el('div', { class: 'pix-card' }, [
+          el('div', { class: 'pix-qr', id: 'pixQrBox' }),
+          el('div', { class: 'small muted', style: { 'margin-bottom': '8px' } },
+            'O cliente escaneia e paga. Confirme o crédito no app bancário antes de finalizar.'),
+          el('button', { class: 'btn primary block', id: 'btnCopyPix' }, [iconEl('copy', 15), ' Copiar Pix copia e cola'])
+        ]),
+        el('div', { class: 'modal-note' }, [
+          iconEl('info', 12), ' Configure a chave Pix em ',
+          el('b', null, 'Configurações → Fiscal'),
+          '. O QR é estático: serve para qualquer valor.'
+        ])
+      ),
       onMount: function (root, close) {
         var box = root.querySelector('#pixQrBox');
         if (payload) {
@@ -1135,11 +1225,13 @@
             tamanho: 190, escuro: '#0d1520', claro: '#ffffff'
           });
           if (!drew) {
-            box.innerHTML = '<div class="pix-copy">' + esc(payload) + '</div>';
+            UI.fill(box, el('div', { class: 'pix-copy' }, payload));
             if (global.console) console.warn('[Pix] gerador de QR indisponível; mostrando copia e cola.');
           }
         } else {
-          box.innerHTML = '<div class="tiny muted" style="padding:16px">Chave Pix não configurada.<br>Vá em Configurações → Fiscal.</div>';
+          UI.fill(box, el('div', { class: 'tiny muted', style: { padding: '16px' } }, [
+            'Chave Pix não configurada.', el('br'), 'Vá em Configurações → Fiscal.'
+          ]));
         }
         var cp = root.querySelector('#btnCopyPix');
         if (cp && payload) {

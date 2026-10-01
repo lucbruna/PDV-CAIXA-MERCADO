@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup macOS · Sudam Gestão PDV</title>
+<style>
+  :root{ --scene-w:1200px; --scene-h:1200px; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:#000;font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+  body{display:flex;align-items:center;justify-content:center;min-height:100vh}
+
+  .scene{
+    position:relative; width:var(--scene-w); height:var(--scene-h); overflow:hidden;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    /* papel de parede estilo macOS (Big Sur / Sonoma) */
+    background:
+      radial-gradient(70% 55% at 18% 12%, #ff8a4c 0%, rgba(255,138,76,0) 58%),
+      radial-gradient(65% 55% at 86% 18%, #ff5ea8 0%, rgba(255,94,168,0) 60%),
+      radial-gradient(75% 60% at 78% 92%, #3b6ef0 0%, rgba(59,110,240,0) 62%),
+      radial-gradient(80% 65% at 12% 88%, #12c2a8 0%, rgba(18,194,168,0) 60%),
+      linear-gradient(150deg,#2a1e5c 0%,#132a63 48%,#071a33 100%);
+  }
+  .scene::after{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 45%, rgba(0,0,0,0) 40%, rgba(0,0,0,.42) 100%);
+  }
+
+  .cabecalho{ position:absolute; top:68px; left:60px; right:60px; text-align:center; z-index:5; }
+  .marca{
+    display:inline-block; color:#eaf1ff; font-weight:800; font-size:14px;
+    letter-spacing:.30em; text-transform:uppercase;
+    background:rgba(255,255,255,.14); padding:6px 14px; border-radius:99px;
+    backdrop-filter:blur(4px);
+  }
+  .titulo{
+    margin-top:16px; color:#fff; font-weight:800; font-size:42px; line-height:1.08;
+    letter-spacing:-.02em; text-shadow:0 8px 32px rgba(0,0,0,.45);
+  }
+  .subtitulo{
+    margin-top:12px; color:rgba(255,255,255,.86); font-weight:500; font-size:19px;
+    text-shadow:0 2px 12px rgba(0,0,0,.40);
+  }
+
+  .palco{ position:relative; z-index:4; }
+
+  .janela{
+    width:1040px; border-radius:14px; overflow:hidden;
+    background:#f3f3f5;
+    box-shadow:0 50px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.22);
+  }
+
+  /* barra de titulo com os semaforos */
+  .barra{
+    position:relative; height:44px; display:flex; align-items:center; padding:0 16px;
+    background:linear-gradient(#fbfbfc,#ececf0);
+    border-bottom:1px solid #d9d9df;
+  }
+  .semaforo{ display:flex; gap:9px; }
+  .semaforo i{ width:13px; height:13px; border-radius:50%; display:block; box-shadow:inset 0 0 0 .5px rgba(0,0,0,.18); }
+  .semaforo i:nth-child(1){ background:#ff5f57 }
+  .semaforo i:nth-child(2){ background:#febc2e }
+  .semaforo i:nth-child(3){ background:#28c840 }
+  .barra-titulo{
+    position:absolute; left:0; right:0; text-align:center; color:#3c3c43;
+    font-size:14px; font-weight:600; letter-spacing:.01em; pointer-events:none;
+  }
+
+  /* barra de endereco */
+  .endereco{
+    height:40px; display:flex; align-items:center; gap:12px; padding:0 16px;
+    background:#f7f7f9; border-bottom:1px solid #e2e2e8;
+  }
+  .endereco .pilula{
+    flex:1; height:26px; display:flex; align-items:center; gap:8px; padding:0 12px;
+    background:#e8e8ed; border:1px solid #dcdce2; border-radius:8px;
+    color:#4a4a52; font-size:13px; font-weight:600;
+  }
+  .cadeado{
+    width:11px; height:14px; border:1.6px solid #8a8a93; border-radius:3px;
+    position:relative; display:inline-block;
+  }
+  .cadeado::before{
+    content:""; position:absolute; left:1.6px; top:-5px; width:5.4px; height:6px;
+    border:1.6px solid #8a8a93; border-bottom:none; border-radius:4px 4px 0 0;
+  }
+
+  .conteudo{
+    position:relative; width:100%; aspect-ratio:16 / 10; background:#04060b;
+    overflow:hidden;
+  }
+  .conteudo img{ width:100%; height:100%; object-fit:contain; display:block; }
+  .conteudo::after{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:linear-gradient(118deg, rgba(255,255,255,.10) 0%, rgba(255,255,255,0) 34%, rgba(255,255,255,0) 70%, rgba(255,255,255,.05) 100%);
+  }
+
+  .chao{
+    position:absolute; left:50%; transform:translateX(-50%); bottom:-34px;
+    width:118%; height:56px; filter:blur(8px); z-index:-1;
+    background:radial-gradient(50% 50% at 50% 50%, rgba(0,0,0,.62), rgba(0,0,0,0) 72%);
+  }
+
+  .rodape{
+    position:absolute; bottom:56px; left:60px; right:60px; text-align:center;
+    color:rgba(255,255,255,.82); font-size:14px; letter-spacing:.14em;
+    text-transform:uppercase; font-weight:600; z-index:5;
+    text-shadow:0 2px 12px rgba(0,0,0,.5);
+  }
+</style>
+</head>
+<body>
+  <section class="scene">
+    <div class="cabecalho">
+      <span class="marca" id="marca">Sudam Gestão PDV</span>
+      <h1 class="titulo" id="titulo" hidden></h1>
+      <p class="subtitulo" id="subtitulo" hidden></p>
+    </div>
+
+    <div class="palco">
+      <div class="janela">
+        <div class="barra">
+          <span class="semaforo"><i></i><i></i><i></i></span>
+          <span class="barra-titulo" id="nomeJanela">Sudam Gestão PDV</span>
+        </div>
+        <div class="endereco">
+          <span class="pilula"><span class="cadeado"></span> localhost:8787</span>
+        </div>
+        <div class="conteudo"><img id="captura" alt="" src=""></div>
+      </div>
+      <div class="chao"></div>
+    </div>
+
+    <div class="rodape" id="rodape" hidden></div>
+  </section>
+
+<script>
+  (function () {
+    var q = new URLSearchParams(location.search);
+    var img = document.getElementById('captura');
+    img.src = q.get('f') || '../fotos/02-frente-de-caixa.png';
+    img.alt = q.get('a') || 'Tela do Sudam Gestão PDV';
+
+    var marca = q.get('m');
+    if (marca !== null) {
+      document.getElementById('marca').textContent = marca;
+      if (marca === '') document.getElementById('marca').hidden = true;
+    }
+
+    var titulo = q.get('t');
+    if (titulo) { var el = document.getElementById('titulo'); el.textContent = titulo; el.hidden = false; }
+
+    var sub = q.get('s');
+    if (sub) { var es = document.getElementById('subtitulo'); es.textContent = sub; es.hidden = false; }
+
+    var janela = q.get('j');
+    if (janela) document.getElementById('nomeJanela').textContent = janela;
+
+    var rod = q.get('r');
+    if (rod) { var er = document.getElementById('rodape'); er.textContent = rod; er.hidden = false; }
+  })();
+</script>
+</body>
+</html>

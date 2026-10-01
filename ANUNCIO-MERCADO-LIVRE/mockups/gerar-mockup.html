@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup Mac · Sudam Gestão PDV</title>
+<style>
+  :root{
+    --scene-w: 1200px;
+    --scene-h: 1200px;
+    --silver-1:#f8f9fb;
+    --silver-2:#dcdfe4;
+    --silver-3:#b3b9c1;
+    --silver-4:#8f959e;
+    --bezel:#040406;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:#000;font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+  body{display:flex;align-items:center;justify-content:center;min-height:100vh}
+
+  .scene{
+    position:relative;
+    width:var(--scene-w);
+    height:var(--scene-h);
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    background:
+      radial-gradient(95% 55% at 50% 6%,  rgba(11,185,120,.30), transparent 62%),
+      radial-gradient(90% 60% at 50% 116%, rgba(0,0,0,.80),       transparent 60%),
+      linear-gradient(158deg,#0b2c24 0%,#071c17 52%,#030d0a 100%);
+  }
+  /* grade sutil ao fundo */
+  .scene::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+    background-size:60px 60px;
+    mask-image: radial-gradient(70% 60% at 50% 42%, #000 0%, transparent 78%);
+    -webkit-mask-image: radial-gradient(70% 60% at 50% 42%, #000 0%, transparent 78%);
+    pointer-events:none;
+  }
+  /* moldura interna de brilho */
+  .scene::after{
+    content:"";
+    position:absolute;
+    inset:26px;
+    border:1px solid rgba(122,240,187,.14);
+    border-radius:26px;
+    pointer-events:none;
+  }
+
+  .cabecalho{
+    position:absolute;
+    top:70px;
+    left:60px;
+    right:60px;
+    text-align:center;
+    z-index:5;
+  }
+  .marca{
+    display:inline-block;
+    color:#8bf0c0;
+    font-weight:800;
+    font-size:15px;
+    letter-spacing:.30em;
+    text-transform:uppercase;
+  }
+  .titulo{
+    margin-top:14px;
+    color:#f2fff9;
+    font-weight:800;
+    font-size:40px;
+    line-height:1.1;
+    letter-spacing:-.02em;
+    text-shadow:0 6px 30px rgba(0,0,0,.55);
+  }
+  .subtitulo{
+    margin-top:12px;
+    color:#a9c8bb;
+    font-weight:500;
+    font-size:19px;
+    line-height:1.35;
+  }
+
+  .palco{
+    position:relative;
+    z-index:4;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+  }
+
+  .device{
+    position:relative;
+    width:1010px;
+    filter:drop-shadow(0 46px 70px rgba(0,0,0,.62));
+  }
+
+  .lid{
+    position:relative;
+    width:100%;
+    border-radius:24px;
+    padding:18px 18px 26px;
+    background:linear-gradient(158deg,var(--silver-1) 0%,var(--silver-2) 46%,var(--silver-3) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.95),
+      inset 0 -2px 4px rgba(0,0,0,.28),
+      0 2px 0 rgba(255,255,255,.25);
+  }
+  /* câmera no besel superior */
+  .camera{
+    position:absolute;
+    top:6px;
+    left:50%;
+    transform:translateX(-50%);
+    width:9px;height:9px;border-radius:50%;
+    background:radial-gradient(circle at 34% 34%, #3c4c58, #06090c 72%);
+    box-shadow:inset 0 0 2px rgba(255,255,255,.45);
+    z-index:3;
+  }
+  .camera::after{
+    content:"";
+    position:absolute; inset:-3px;
+    border-radius:50%;
+    border:1px solid rgba(0,0,0,.22);
+  }
+
+  .tela{
+    position:relative;
+    width:100%;
+    aspect-ratio:16 / 10;
+    border-radius:11px;
+    overflow:hidden;
+    background:var(--bezel);
+    box-shadow:
+      inset 0 0 0 1px rgba(255,255,255,.08),
+      inset 0 0 26px rgba(0,0,0,.65);
+  }
+  .tela img{
+    width:100%;
+    height:100%;
+    object-fit:contain;
+    display:block;
+  }
+  /* reflexo suave no vidro */
+  .tela::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:linear-gradient(118deg, rgba(255,255,255,.14) 0%, rgba(255,255,255,0) 32%, rgba(255,255,255,0) 68%, rgba(255,255,255,.06) 100%);
+    pointer-events:none;
+  }
+
+  .base{
+    position:relative;
+    width:114%;
+    margin-left:-7%;
+    height:24px;
+    margin-top:-2px;
+    background:linear-gradient(#f0f2f5 0%, #c7ccd3 58%, #969ca5 100%);
+    border-radius:0 0 20px 20px;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.95),
+      0 16px 26px rgba(0,0,0,.48);
+  }
+  .base::before{
+    content:"";
+    position:absolute;
+    top:0;left:50%;transform:translateX(-50%);
+    width:190px;height:11px;
+    border-radius:0 0 13px 13px;
+    background:linear-gradient(#b4bac2, #d8dce1);
+    box-shadow:inset 0 -2px 3px rgba(0,0,0,.26);
+  }
+
+  .chao{
+    position:absolute;
+    bottom:-30px;left:50%;transform:translateX(-50%);
+    width:125%;height:52px;
+    background:radial-gradient(50% 50% at 50% 50%, rgba(0,0,0,.60), rgba(0,0,0,0) 72%);
+    filter:blur(7px);
+    z-index:-1;
+  }
+
+  .rodape{
+    position:absolute;
+    bottom:56px;
+    left:60px;right:60px;
+    text-align:center;
+    color:#78c9a5;
+    font-size:15px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    font-weight:600;
+    z-index:5;
+  }
+</style>
+</head>
+<body>
+  <section class="scene">
+    <div class="cabecalho">
+      <span class="marca" id="marca">Sudam Gestão PDV</span>
+      <h1 class="titulo" id="titulo" hidden></h1>
+      <p class="subtitulo" id="subtitulo" hidden></p>
+    </div>
+
+    <div class="palco">
+      <div class="device">
+        <div class="lid">
+          <span class="camera"></span>
+          <div class="tela"><img id="captura" alt="" src=""></div>
+        </div>
+        <div class="base"></div>
+        <div class="chao"></div>
+      </div>
+    </div>
+
+    <div class="rodape" id="rodape" hidden></div>
+  </section>
+
+<script>
+  (function () {
+    var q = new URLSearchParams(location.search);
+    var arquivo = q.get('f') || '../fotos/02-frente-de-caixa.png';
+    var img = document.getElementById('captura');
+    img.src = arquivo;
+    img.alt = q.get('a') || 'Tela do Sudam Gestão PDV';
+
+    var marca = q.get('m');
+    document.getElementById('marca').textContent = marca === null ? 'Sudam Gestão PDV' : marca;
+    if (marca === '') document.getElementById('marca').hidden = true;
+
+    var titulo = q.get('t');
+    if (titulo) { var el = document.getElementById('titulo'); el.textContent = titulo; el.hidden = false; }
+
+    var sub = q.get('s');
+    if (sub) { var es = document.getElementById('subtitulo'); es.textContent = sub; es.hidden = false; }
+
+    var rod = q.get('r');
+    if (rod) { var er = document.getElementById('rodape'); er.textContent = rod; er.hidden = false; }
+  })();
+</script>
+</body>
+</html>

@@ -1,10 +1,10 @@
 /* Teste de restauracao de backup.
  *
  * Um backup que ninguem restaurou nao e backup -- e so um arquivo ocupando
- * espaco. Este teste faz o caminho inteiro: popula um banco, deixa o servidor
- * gravar o backup no desligamento, copia o par .db/-wal para outra pasta,
- * sobe um servidor novo apontado para essa copia e confere que os dados
- * voltaram inteiros (login, produtos, estoque e venda).
+ * espaco. Este teste faz o caminho inteiro: popula um banco, grava o backup
+ * (VACUUM INTO, um arquivo so), copia esse arquivo para outra pasta, sobe um
+ * servidor novo apontado para a copia e confere que os dados voltaram
+ * inteiros (login, produtos, estoque e venda).
  *
  * Uso: node servidor/teste/backup-restaura.mjs <pasta-temporaria> <raiz-servidor>
  */
@@ -31,7 +31,7 @@ function check(nome, cond, extra = '') {
 function sobe(porta, db, backup) {
   const s = spawn(process.execPath, ['servidor.mjs'], {
     cwd: RAIZ,
-    env: { ...process.env, SUDAM_DB: db, SUDAM_PORTA: String(porta), SUDAM_BACKUP: backup },
+    env: { ...process.env, SUDAM_DB: db, SUDAM_PORTA: String(porta), SUDAM_BACKUP: backup, SUDAM_HOST: '127.0.0.1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   s.stdout.on('data', () => {});
@@ -118,10 +118,14 @@ try {
   process.env.SUDAM_DB = ORIGINAL;
   process.env.SUDAM_BACKUP = PASTA_BACKUP;
   const { fazerBackupAgora } = await import('../backup.mjs');
-  fazerBackupAgora();
+  /* Passa o handle do banco, como o servidor faz: e o caminho que usa
+     VACUUM INTO. Chamar sem handle cairia na copia de arquivo de reserva. */
+  const bdBackup = new DatabaseSync(ORIGINAL);
+  fazerBackupAgora(bdBackup);
+  bdBackup.close();
   await espera(300);
 
-  console.log('\n3. O backup existe e tem o par .db + -wal');
+  console.log('\n3. O backup existe e e um arquivo unico e consistente');
   const arquivos = existsSync(PASTA_BACKUP) ? readdirSync(PASTA_BACKUP) : [];
   check('a pasta de backup tem arquivos', arquivos.length > 0, arquivos.join(', '));
   const stamp = arquivos
@@ -130,16 +134,15 @@ try {
     .sort()
     .pop();
   check('existe um sudam.<carimbo>', !!stamp, arquivos.join(', '));
-  check('existe o -wal do mesmo carimbo', !!stamp && existsSync(join(PASTA_BACKUP, 'sudam-wal.' + stamp)),
-    arquivos.join(', '));
+  /* VACUUM INTO ja aplica o WAL na copia: nao ha par .db/-wal para
+     desencontrar, e o -wal separado nao pode existir. */
+  check('nao ha -wal separado (backup autocontido)',
+    !!stamp && !existsSync(join(PASTA_BACKUP, 'sudam-wal.' + stamp)), arquivos.join(', '));
   if (!stamp) throw new Error('sem backup para restaurar');
 
   console.log('\n4. Copia o backup para uma pasta nova (como numa maquina nova)');
   copyFileSync(join(PASTA_BACKUP, 'sudam.' + stamp), join(RESTAURADO, 'sudam.db'));
-  const temWal = existsSync(join(PASTA_BACKUP, 'sudam-wal.' + stamp));
-  if (temWal) copyFileSync(join(PASTA_BACKUP, 'sudam-wal.' + stamp), join(RESTAURADO, 'sudam.db-wal'));
   check('copia do .db restaurado', existsSync(join(RESTAURADO, 'sudam.db')));
-  check('copia do -wal restaurado', !temWal || existsSync(join(RESTAURADO, 'sudam.db-wal')));
 
   console.log('\n5. Sobe um servidor novo so com o backup restaurado');
   B = sobe(PORTA_B, join(RESTAURADO, 'sudam.db'), join(RESTAURADO, 'backup-novo'));

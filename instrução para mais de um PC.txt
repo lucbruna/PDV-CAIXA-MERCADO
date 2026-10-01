@@ -1,0 +1,17 @@
+powershell -ExecutionPolicy Bypass -File GERAR-CERTIFICADO.ps1
+
+Gerando certificado autoassinado...
+
+
+Para ligar o HTTPS, defina estas variaveis antes de iniciar o PDV:
+  No PowerShell, use `$env:` para definir variáveis de ambiente:
+
+```
+$env:SUDAM_TLS = "1"
+$env:SUDAM_PFX = "C:\Users\tomga\OneDrive\Desktop\proximo PDV MERCADO\servidor\certificado.pfx"
+$env:SUDAM_PFX_SENHA = "iDMDQ2kKgl-SvTgJcN-LuBwIUPrzsvA60_5tf1fpnD0"
+& ".\INICIAR PDV.bat"
+```
+
+Set-Location "C:\Users\tomga\OneDrive\Desktop\proximo PDV MERCADO"
+& ".\LIBERAR-FIREWALL.bat"

@@ -1,0 +1,34 @@
+Use um computador como servidor e deixe os outros como caixas. O servidor mantém o banco único; os demais acessam o mesmo endereço pelo navegador. Não inicie um servidor separado em cada caixa.
+
+## Se o servidor for Windows
+
+Conecte o computador servidor e os caixas à mesma rede privada. Reserve um IP para o servidor no roteador, para ele não mudar. Deixe o computador ligado e impeça que entre em suspensão.
+
+No servidor, confirme que o Node.js é 22.5 ou superior e gere o certificado depois de definir o IP:
+
+powershell -ExecutionPolicy Bypass -File GERAR-CERTIFICADO.ps1
+
+Guarde a senha aleatória que o script mostrar.
+
+Abra o Prompt de Comando na pasta do PDV, configure o PFX e inicie o programa:
+
+set "SUDAM_TLS=1"
+set "SUDAM_PFX=C:\caminho\do\PDV\servidor\certificado.pfx"
+set "SUDAM_PFX_SENHA=COLE_A_SENHA_GERADA"
+"INICIAR PDV.bat"
+
+Use o caminho real do arquivo. Mantenha essa janela do servidor aberta. Depois, execute LIBERAR-FIREWALL.bat como administrador para permitir conexões da rede local.
+
+No próprio servidor, abra https://localhost:8787 e faça a configuração inicial. Se os dados padrão ainda estiverem ativos, entre como admin / 1234 e troque a senha em Ajustes → Usuários e acessos → Trocar minha senha.
+
+Nos outros computadores, abra https://IP-DO-SERVIDOR:8787, usando o IP exibido pelo servidor. O navegador pode mostrar um aviso por causa do certificado autoassinado; aceite-o para continuar. Depois, cada operador entra com sua própria conta.
+
+## Se o servidor for Linux
+
+Com Node.js 22.5 ou superior e nginx instalados, execute:
+
+sudo ./instalar-linux.sh --com-nginx
+
+Faça a configuração inicial no próprio servidor em https://localhost/. Nos caixas, use o endereço https://IP-DO-SERVIDOR/ mostrado pelo instalador e aceite o aviso do certificado autoassinado.
+
+Se o computador não abrir o endereço, confira se está na mesma rede — alguns roteadores isolam os dispositivos conectados à rede de convidados. Use sempre HTTPS para os caixas e mantenha o servidor ligado durante a operação.

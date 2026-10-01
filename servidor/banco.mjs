@@ -7,11 +7,23 @@
  * leituras de Store.db no cliente precisa mudar.
  */
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { centavos, arred2 } from './dinheiro.mjs';
 
 const aqui = dirname(fileURLToPath(import.meta.url));
+
+/* Onde o banco morava ate agora: `servidor/dados`, DENTRO da pasta do
+   programa. No Windows (instalacao por usuario em %LOCALAPPDATA%\Programs\...)
+   isso significa que apagar ou reinstalar a pasta leva junto o historico de
+   vendas. Este e o caminho antigo, mantido para migrar quem ja tem dados. */
+const LEGADO = join(aqui, 'dados', 'sudam.db');
+
+/* Resolve o caminho uma vez e guarda. A pasta de backup acompanha este
+   resultado (ver caminhoBackup), entao a copia nunca cai num disco diferente
+   do banco sem querer. */
+let _arquivo = null;
 
 /* A pasta de backup acompanha o banco. Se SUDAM_DB aponta para outro disco,
    o backup precisa ir para o lado daquele banco -- senao o .db fica em
@@ -22,8 +34,42 @@ export function caminhoBackup() {
   return process.env.SUDAM_BACKUP || join(dirname(caminhoBanco()), 'backup');
 }
 
+/* Na primeira vez que o servidor sobe numa instalacao Windows antiga, copia o
+   banco de dentro da pasta do programa para o novo local persistente. A copia
+   (e nao o movimento) deixa o arquivo antigo no lugar: se algo der errado, os
+   dados continuam onde estavam. Se a copia falhar, seguimos usando o banco
+   antigo em vez de comecar um vazio -- perder venda e o pior resultado. */
+function adotarBancoLegado(destino) {
+  if (destino === LEGADO) return LEGADO;
+  if (existsSync(destino) || !existsSync(LEGADO)) return destino;
+  try {
+    mkdirSync(dirname(destino), { recursive: true });
+    for (const sufixo of ['', '-wal', '-shm']) {
+      if (existsSync(LEGADO + sufixo)) copyFileSync(LEGADO + sufixo, destino + sufixo);
+    }
+    console.log('  banco da instalacao anterior copiado para: ' + destino);
+    return destino;
+  } catch (e) {
+    console.error('  (nao deu para copiar o banco antigo: ' + e.message + ')');
+    console.error('  continuando a usar o banco em: ' + LEGADO);
+    return LEGADO;
+  }
+}
+
 export function caminhoBanco() {
-  return process.env.SUDAM_DB || join(aqui, 'dados', 'sudam.db');
+  if (_arquivo) return _arquivo;
+  if (process.env.SUDAM_DB) {
+    _arquivo = process.env.SUDAM_DB;
+    return _arquivo;
+  }
+  /* Windows: %ProgramData% e gravavel por usuario comum e vive fora da pasta
+     do programa, entao reinstalar o PDV nao apaga mais o historico. */
+  if (process.platform === 'win32' && process.env.ProgramData) {
+    _arquivo = adotarBancoLegado(join(process.env.ProgramData, 'Sudam Gestao PDV', 'dados', 'sudam.db'));
+    return _arquivo;
+  }
+  _arquivo = LEGADO;
+  return _arquivo;
 }
 
 export function abrir() {
@@ -36,13 +82,17 @@ export function abrir() {
   db.exec('PRAGMA foreign_keys = ON');
   db.exec('PRAGMA busy_timeout = 5000');
 
+  /* As colunas de dinheiro (price, debt, total, amount) sao INTEGER em
+     CENTAVOS inteiros -- ver dinheiro.mjs. O JSON ao lado continua em reais,
+     que e o contrato do cliente; a coluna e so um espelho tipado. `stock` e
+     quantidade, nao dinheiro, e mantem os decimais. */
   db.exec(`
     CREATE TABLE IF NOT EXISTS produtos (
       id TEXT PRIMARY KEY,
       code TEXT,
       name TEXT,
       category TEXT,
-      price REAL,
+      price INTEGER,
       stock REAL,
       divergencia INTEGER DEFAULT 0,
       json TEXT NOT NULL
@@ -55,7 +105,7 @@ export function abrir() {
       id TEXT PRIMARY KEY,
       name TEXT,
       cpf TEXT,
-      debt REAL,
+      debt INTEGER,
       json TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS ix_cli_name ON clientes(name);
@@ -73,7 +123,7 @@ export function abrir() {
       shiftId TEXT,
       operatorId TEXT,
       customerId TEXT,
-      total REAL,
+      total INTEGER,
       forma TEXT,
       divergencia INTEGER DEFAULT 0,
       json TEXT NOT NULL
@@ -89,7 +139,7 @@ export function abrir() {
       date TEXT,
       type TEXT,
       category TEXT,
-      amount REAL,
+      amount INTEGER,
       customerId TEXT,
       source TEXT,
       settled INTEGER DEFAULT 0,
@@ -110,7 +160,7 @@ export function abrir() {
       id TEXT PRIMARY KEY,
       date TEXT,
       supplierId TEXT,
-      total REAL,
+      total INTEGER,
       json TEXT NOT NULL
     );
 
@@ -118,7 +168,7 @@ export function abrir() {
       id TEXT PRIMARY KEY,
       date TEXT,
       dueDate TEXT,
-      amount REAL,
+      amount INTEGER,
       paid INTEGER DEFAULT 0,
       json TEXT NOT NULL
     );
@@ -170,7 +220,33 @@ export function abrir() {
     db.exec('ALTER TABLE produtos ADD COLUMN divergencia INTEGER DEFAULT 0');
   }
 
+  migrarParaCentavos(db);
   return db;
+}
+
+/* ---------- dinheiro em centavos ----------
+ *
+ * Bancos criados antes desta mudanca guardavam reais em ponto flutuante nas
+ * colunas de dinheiro. A conversao roda UMA vez e grava a flag em `meta`; sem
+ * ela o valor seria multiplicado por 100 a cada boot (5000 -> 500000 -> ...).
+ *
+ * O JSON nao e tocado: ele sempre esteve, e continua, em reais. */
+function migrarParaCentavos(db) {
+  if (lerMeta(db, 'centavos') === 'sim') return;
+  const alvos = [
+    ['produtos', 'price'],
+    ['clientes', 'debt'],
+    ['vendas', 'total'],
+    ['compras', 'total'],
+    ['lancamentos', 'amount'],
+    ['contas_pagar', 'amount'],
+  ];
+  for (const [tabela, coluna] of alvos) {
+    try {
+      db.exec(`UPDATE ${tabela} SET ${coluna} = ROUND(${coluna} * 100) WHERE ${coluna} IS NOT NULL`);
+    } catch { /* tabela ausente em banco exotico: nada a converter */ }
+  }
+  gravarMeta(db, 'centavos', 'sim');
 }
 
 /* ---------- acesso generico por colecao ---------- */
@@ -245,14 +321,19 @@ export function gravar(db, tabela, obj, opcoes = {}) {
 function sanear(tabela, obj) {
   if (tabela !== 'produtos') return obj;
   const saida = { ...obj };
+  if (saida.stockDeposit == null && saida.stockSales == null) {
+    const stock = Number(saida.stock) || 0;
+    saida.stockDeposit = saida.stockArea === 'venda' ? 0 : stock;
+    saida.stockSales = saida.stockArea === 'venda' ? stock : 0;
+  }
   const preco = Number(saida.price);
   if (Number.isFinite(preco)) {
-    saida.price = Math.round((preco + Number.EPSILON) * 100) / 100;
+    saida.price = arred2(preco);
     if (saida.price < 0) throw Object.assign(new Error('Preco nao pode ser negativo.'), { status: 400 });
   }
   const estoque = Number(saida.stock);
   if (Number.isFinite(estoque)) {
-    saida.stock = Math.round((estoque + Number.EPSILON) * 100) / 100;
+    saida.stock = arred2(estoque);
     if (saida.stock < 0) throw Object.assign(new Error('Estoque nao pode ser negativo no cadastro.'), { status: 400 });
   }
   /* Texto sem teto vira peso morto: o .db inteiro e copiado a cada hora. */
@@ -322,6 +403,10 @@ function colunas(t) {
   }
 }
 
+/* Colunas que guardam dinheiro, e por isso vao para o banco em CENTAVOS
+ * inteiros. O valor no JSON continua em reais. */
+const COLUNAS_CENTAVOS = new Set(['price', 'debt', 'total', 'amount']);
+
 function valorColuna(col, obj) {
   if (!col) return null;
   if (col === 'forma') {
@@ -332,6 +417,9 @@ function valorColuna(col, obj) {
   if (col === 'settled') return obj.settled ? 1 : 0;
   if (col === 'paid') return obj.paid ? 1 : 0;
   if (col === 'active') return obj.active === false ? 0 : 1;
+  if (COLUNAS_CENTAVOS.has(col)) {
+    return obj[col] === undefined || obj[col] === null ? null : centavos(obj[col]);
+  }
   return obj[col] === undefined ? null : obj[col];
 }
 

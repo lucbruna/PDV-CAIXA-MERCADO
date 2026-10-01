@@ -136,6 +136,14 @@
       '</svg>';
   }
 
+  /* Versão em NÓ de icon(): monta o SVG de verdade. O markup dos ícones é
+     constante (definido no código), então pode ir para innerHTML sem risco. */
+  function iconEl(name, size, sw) {
+    var t = document.createElement('template');
+    t.innerHTML = icon(name, size, sw);
+    return t.content.firstChild;
+  }
+
   /* ---------------- formatação ---------------- */
   var BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
   var NUM2 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -183,15 +191,81 @@
   function $(sel, root) { return (root || document).querySelector(sel); }
   function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
 
-  function el(tag, attrs, html) {
-    var n = document.createElement(tag);
-    if (attrs) Object.keys(attrs).forEach(function (k) {
-      if (k === 'class') n.className = attrs[k];
-      else if (k.slice(0, 2) === 'on') n.addEventListener(k.slice(2).toLowerCase(), attrs[k]);
-      else if (attrs[k] != null && attrs[k] !== false) n.setAttribute(k, attrs[k]);
+  /* ------------------------------------------------------------------
+     Construção de DOM — a interface é montada com createElement.
+
+     Valor que vem do banco virá como NÓ DE TEXTO (textContent), nunca como
+     marcação: é isso que elimina a classe de bug de HTML. Antes, cada tela
+     concatenava strings e dependia de lembrar do esc() em CADA ponto; um
+     esquecimento num único campo (o "Emoji / imagem" do produto foi o caso
+     real) executava HTML digitado pelo caixa nos outros terminais.
+
+     el(tag, attrs, filhos): filhos aceita nó, array ou texto. ATENÇÃO: string
+     em `filhos` vira TEXTO, não HTML.
+     ------------------------------------------------------------------ */
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+
+  function append(parent, child) {
+    if (child == null || child === false || child === true) return;
+    if (Array.isArray(child)) { child.forEach(function (c) { append(parent, c); }); return; }
+    if (child instanceof Node) { parent.appendChild(child); return; }
+    parent.appendChild(document.createTextNode(String(child)));
+  }
+
+  function setAttrs(n, attrs, isSvg) {
+    if (!attrs) return;
+    Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (v == null || v === false) return;
+      if (k === 'class') n.setAttribute('class', v);
+      else if (k === 'text') n.textContent = v;
+      else if (k === 'style' && typeof v === 'object') {
+        Object.keys(v).forEach(function (p) { n.style.setProperty(p, v[p]); });
+      } else if (k.slice(0, 2) === 'on' && typeof v === 'function') {
+        n.addEventListener(k.slice(2).toLowerCase(), v);
+      } else if (!isSvg && (k === 'checked' || k === 'disabled' || k === 'selected' || k === 'multiple')) {
+        if (v) n[k] = true; else n.removeAttribute(k);
+      } else {
+        n.setAttribute(k, v === true ? '' : v);
+      }
     });
-    if (html != null) n.innerHTML = html;
+  }
+
+  function el(tag, attrs, children) {
+    var n = document.createElement(tag);
+    setAttrs(n, attrs, false);
+    if (children !== undefined) append(n, children);
     return n;
+  }
+
+  /* Mesmo que el(), mas em SVG (createElementNS). */
+  function svgEl(tag, attrs, children) {
+    var n = document.createElementNS(SVG_NS, tag);
+    setAttrs(n, attrs, true);
+    if (children !== undefined) append(n, children);
+    return n;
+  }
+
+  function frag() {
+    var f = document.createDocumentFragment();
+    for (var i = 0; i < arguments.length; i++) append(f, arguments[i]);
+    return f;
+  }
+
+  /* Esvazia o nó e recebe o novo conteúdo (nó, array ou texto). */
+  function fill(node, children) {
+    if (!node) return node;
+    while (node.firstChild) node.removeChild(node.firstChild);
+    append(node, children);
+    return node;
+  }
+
+  /* Só markup CONSTANTE definido no código passa por innerHTML. É o caminho do
+     legado (chamador já escapou) e não é injetável: nunca recebe dado do banco. */
+  function appendBody(node, body) {
+    if (body == null || body === '') return;
+    if (typeof body === 'string') { node.innerHTML = body; return; }
+    append(node, body);
   }
 
   /* ---------------- toasts ---------------- */
@@ -203,7 +277,7 @@
     }
     var k = kind || 'ok';
     var ic = k === 'ok' ? 'check' : k === 'err' ? 'alert' : k === 'warn' ? 'alert' : 'info';
-    var t = el('div', { class: 'toast ' + k }, icon(ic, 17) + '<span>' + esc(msg) + '</span>');
+    var t = el('div', { class: 'toast ' + k }, [iconEl(ic, 17), el('span', null, msg)]);
     wrap.appendChild(t);
     setTimeout(function () {
       t.classList.add('out');
@@ -214,37 +288,45 @@
   /* ---------------- modal ---------------- */
   var modalStack = [];
 
+  /* Ha modal na tela? Quem atualiza dados em segundo plano usa isto para nao
+     redesenhar a pagina por baixo de um dialogo aberto. */
+  function modalAberto() { return modalStack.length > 0; }
+
   function modal(opts) {
     var ov = el('div', { class: 'overlay' });
     var m = el('div', { class: 'modal ' + (opts.size ? 'w-' + opts.size : '') });
 
-    var head = '';
     if (opts.title) {
-      head = '<div class="modal-head"><div><h2>' + icon(opts.icon || 'info', 17) + esc(opts.title) + '</h2>' +
-        (opts.subtitle ? '<p>' + esc(opts.subtitle) + '</p>' : '') + '</div>' +
-        '<button class="icon-btn" data-close aria-label="Fechar">' + icon('x', 17) + '</button></div>';
+      m.appendChild(el('div', { class: 'modal-head' }, [
+        el('div', null, [
+          el('h2', null, [iconEl(opts.icon || 'info', 17), opts.title]),
+          opts.subtitle ? el('p', null, opts.subtitle) : null
+        ]),
+        el('button', { class: 'icon-btn', 'data-close': '', 'aria-label': 'Fechar' }, iconEl('x', 17))
+      ]));
     }
 
-    var tabs = '';
     if (opts.tabs && opts.tabs.length) {
-      tabs = '<div class="modal-tabs">' + opts.tabs.map(function (t, i) {
-        return '<button class="mtab' + (i === 0 ? ' active' : '') + '" data-tab="' + esc(t.id) + '">' +
-          (t.icon ? icon(t.icon, 15) : '') + esc(t.label) + '</button>';
-      }).join('') + '</div>';
+      m.appendChild(el('div', { class: 'modal-tabs' }, opts.tabs.map(function (t, i) {
+        return el('button', { class: 'mtab' + (i === 0 ? ' active' : ''), 'data-tab': t.id },
+          [t.icon ? iconEl(t.icon, 15) : null, t.label]);
+      })));
     }
 
-    var body = '<div class="modal-body">' + (opts.body || '') + '</div>';
+    var bodyBox = el('div', { class: 'modal-body' });
+    appendBody(bodyBox, opts.body);
+    m.appendChild(bodyBox);
 
-    var foot = '';
     if (opts.footer !== false) {
-      foot = '<div class="modal-foot">' +
-        (opts.footLeft ? '<div class="left">' + opts.footLeft + '</div>' : '') +
-        '<button class="btn ghost" data-close>Cancelar</button>' +
-        (opts.confirmText ? '<button class="btn ' + (opts.danger ? 'danger' : 'primary') + '" data-confirm>' + esc(opts.confirmText) + '</button>' : '') +
-        '</div>';
+      var left = el('div', { class: 'left' });
+      appendBody(left, opts.footLeft);
+      m.appendChild(el('div', { class: 'modal-foot' }, [
+        opts.footLeft ? left : null,
+        el('button', { class: 'btn ghost', 'data-close': '' }, 'Cancelar'),
+        opts.confirmText ? el('button', { class: 'btn ' + (opts.danger ? 'danger' : 'primary'), 'data-confirm': '' }, opts.confirmText) : null
+      ]));
     }
 
-    m.innerHTML = head + tabs + body + foot;
     ov.appendChild(m);
     document.body.appendChild(ov);
     requestAnimationFrame(function () { ov.classList.add('show'); });
@@ -287,23 +369,34 @@
       var settled = false;
       function done(v) { if (settled) return; settled = true; resolve(v); }
 
+      /* 'message' é texto puro; 'html' aceita nó (seguro) ou, no legado,
+         string de markup constante já montada pelo chamador. */
+      var msg = el('p');
+      if (opts.html != null) appendBody(msg, opts.html);
+      else append(msg, opts.message || '');
+
       modal({
-        title: null, size: 'sm', body: '',
+        title: null, size: 'sm',
         // footer:false — o confirm cria o proprio rodape em onMount. Sem isso o
         // modal.js ainda renderiza um "Cancelar" extra que fecha o dialogo sozinho.
         footer: false,
-        body: '<div class="confirm-box"><div class="confirm-icon ' + kind + '">' + icon(ic, 23) + '</div>' +
-          '<h3 style="margin:0 0 9px;font-size:16px;font-weight:800">' + esc(opts.title) + '</h3>' +
-          '<p>' + (opts.html || esc(opts.message || '')) + '</p></div>',
-        footer: false,
+        body: el('div', { class: 'confirm-box' }, [
+          el('div', { class: 'confirm-icon ' + kind }, iconEl(ic, 23)),
+          el('h3', { style: { margin: '0 0 9px', 'font-size': '16px', 'font-weight': '800' } }, opts.title),
+          msg
+        ]),
         onMount: function (root, close) {
-          var bar = el('div', { class: 'modal-foot' });
-          bar.innerHTML = '<button class="btn ghost" data-no>Cancelar</button>' +
-            '<button class="btn ' + (kind === 'danger' ? 'danger' : 'primary') + '" data-yes>' + esc(opts.confirmText || 'Confirmar') + '</button>';
-          root.appendChild(bar);
-          bar.querySelector('[data-no]').onclick = function () { done(false); close(); };
-          bar.querySelector('[data-yes]').onclick = function () { done(true); close(); };
-          setTimeout(function () { bar.querySelector('[data-yes]').focus(); }, 60);
+          var no = el('button', { class: 'btn ghost', 'data-no': '' }, 'Cancelar');
+          var yes = el('button', { class: 'btn ' + (kind === 'danger' ? 'danger' : 'primary'), 'data-yes': '' }, opts.confirmText || 'Confirmar');
+          root.appendChild(el('div', { class: 'modal-foot' }, [no, yes]));
+          no.onclick = function () { done(false); close(); };
+          yes.onclick = function () {
+            // Executa a ação durante o clique original. Isso preserva a
+            // ativação do usuário exigida por window.open/diálogo de impressão.
+            if (opts.onConfirm) opts.onConfirm();
+            done(true); close();
+          };
+          setTimeout(function () { yes.focus(); }, 60);
         },
         onClose: function () { done(false); }
       });
@@ -315,34 +408,52 @@
       var settled = false;
       function done(v) { if (settled) return; settled = true; resolve(v); }
 
+      /* number nativo rejeita "40,5"; para valores em pt-BR usamos text+inputmode.
+         Com select, o próprio <select> é criado (sem trocar outerHTML depois). */
+      var campo;
+      if (opts.select) {
+        campo = el('select', { class: 'field', id: '__prompt' }, opts.select.map(function (o) {
+          var opt = el('option', { value: o.value }, o.label);
+          if (String(o.value) === String(opts.value)) opt.setAttribute('selected', '');
+          return opt;
+        }));
+      } else {
+        var ehNum = opts.type === 'number' || opts.type === 'money';
+        campo = el('input', {
+          class: 'field', id: '__prompt',
+          type: ehNum ? 'text' : (opts.type || 'text'),
+          inputmode: ehNum ? 'decimal' : null,
+          autocomplete: ehNum ? 'off' : null,
+          placeholder: opts.placeholder || null
+        });
+        campo.setAttribute('value', opts.value == null ? '' : String(opts.value));
+      }
+
       modal({
         title: opts.title, icon: opts.icon || 'edit', size: 'sm',
-        body: '<div class="form-grid"><div class="full"><label class="lbl">' + esc(opts.label || 'Valor') + '</label>' +
-          '<input class="field" id="__prompt" ' +
-          /* number nativo rejeita "40,5"; para valores em pt-BR usamos text+inputmode */
-          ((opts.type === 'number' || opts.type === 'money') ? 'type="text" inputmode="decimal" autocomplete="off"' : 'type="' + esc(opts.type || 'text') + '"') +
-          (opts.placeholder ? ' placeholder="' + esc(opts.placeholder) + '"' : '') + ' value="' + esc(opts.value || '') + '"></div></div>' +
-          (opts.hint ? '<div class="modal-note">' + esc(opts.hint) + '</div>' : ''),
+        body: opts.hint
+          ? frag(
+              el('div', { class: 'form-grid' }, el('div', { class: 'full' }, [
+                el('label', { class: 'lbl' }, opts.label || 'Valor'), campo
+              ])),
+              el('div', { class: 'modal-note' }, opts.hint)
+            )
+          : el('div', { class: 'form-grid' }, el('div', { class: 'full' }, [
+              el('label', { class: 'lbl' }, opts.label || 'Valor'), campo
+            ])),
         confirmText: opts.confirmText || 'Confirmar',
         danger: opts.danger,
         onMount: function (root) {
-          var i = root.querySelector('#__prompt');
-          if (opts.type === 'number' || opts.type === 'money') i.value = opts.value != null ? opts.value : '';
-          if (opts.select) {
-            i.outerHTML = '<select class="field" id="__prompt">' + opts.select.map(function (o) {
-              return '<option value="' + esc(o.value) + '">' + esc(o.label) + '</option>';
-            }).join('') + '</select>';
-          }
-          i.addEventListener('keydown', function (ev) {
+          campo.addEventListener('keydown', function (ev) {
             if (ev.key === 'Enter') {
               ev.preventDefault();
-              done(i.value);
+              done(campo.value);
               root.closest('.overlay').querySelector('[data-confirm]').click();
             }
           });
         },
-        onConfirm: function (root) {
-          var v = root.querySelector('#__prompt').value;
+        onConfirm: function () {
+          var v = campo.value;
           if (opts.required && !String(v).trim()) { toast('Preencha o campo.', 'err'); return false; }
           done(v);
         },
@@ -364,45 +475,66 @@
     return out;
   }
 
-  function field(label, name, value, opts) {
+  /* Monta o campo com DOM e serializa de volta para string. O retorno continua
+     sendo HTML porque ~70 pontos do app concatenam o resultado -- mas o valor
+     passa por textContent/atributo, então não escapa para dentro da marcação. */
+  function fieldEl(label, name, value, opts) {
     opts = opts || {};
-    var v = esc(value == null ? '' : value);
     var input;
     if (opts.type === 'select') {
-      input = '<select class="field" name="' + name + '">' + (opts.options || []).map(function (o) {
+      input = el('select', { class: 'field', name: name }, (opts.options || []).map(function (o) {
         var val = o.value != null ? o.value : o;
         var lb = o.label != null ? o.label : o;
-        return '<option value="' + esc(val) + '"' + (String(val) === String(value) ? ' selected' : '') + '>' + esc(lb) + '</option>';
-      }).join('') + '</select>';
+        var opt = el('option', { value: val }, lb);
+        if (String(val) === String(value)) opt.setAttribute('selected', '');
+        return opt;
+      }));
     } else if (opts.type === 'textarea') {
-      input = '<textarea class="field" name="' + name + '" rows="' + (opts.rows || 3) + '" placeholder="' + esc(opts.placeholder || '') + '">' + v + '</textarea>';
+      input = el('textarea', { class: 'field', name: name, rows: opts.rows || 3, placeholder: opts.placeholder || null });
+      input.textContent = value == null ? '' : String(value);
     } else {
       /* 'money' usa text+inputmode em vez de type=number: o number nativo
          REJEITA "40,5" (exige ponto) e devolve string vazia, o que quebrava o
          preenchimento automático de valores em pt-BR. parseNum() lê os dois. */
-      var type = opts.type === 'money' ? 'text' : (opts.type || 'text');
-      var extra = opts.type === 'money' ? ' inputmode="decimal" autocomplete="off"' : '';
-      input = '<input class="field" name="' + name + '" type="' + type + '" value="' + v + '"' +
-        (opts.step ? ' step="' + opts.step + '"' : '') + (opts.min != null ? ' min="' + opts.min + '"' : '') +
-        (opts.placeholder ? ' placeholder="' + esc(opts.placeholder) + '"' : '') +
-        (opts.maxlength ? ' maxlength="' + opts.maxlength + '"' : '') + extra + '>';
+      input = el('input', {
+        class: 'field', name: name,
+        type: opts.type === 'money' ? 'text' : (opts.type || 'text'),
+        inputmode: opts.type === 'money' ? 'decimal' : null,
+        autocomplete: opts.type === 'money' ? 'off' : null,
+        step: opts.step || null,
+        min: opts.min != null ? opts.min : null,
+        placeholder: opts.placeholder || null,
+        maxlength: opts.maxlength || null
+      });
+      input.setAttribute('value', value == null ? '' : String(value));
     }
-    return '<div' + (opts.full ? ' class="full"' : '') + '><label class="lbl">' + esc(label) + '</label>' + input +
-      (opts.hint ? '<div class="tiny muted" style="margin-top:4px">' + esc(opts.hint) + '</div>' : '') + '</div>';
+    return el('div', { class: opts.full ? 'full' : null }, [
+      el('label', { class: 'lbl' }, label),
+      input,
+      opts.hint ? el('div', { class: 'tiny muted', style: { 'margin-top': '4px' } }, opts.hint) : null
+    ]);
   }
 
-  function checkbox(label, name, checked, hint) {
-    return '<div class="full"><label class="check"><input type="checkbox" name="' + name + '"' + (checked ? ' checked' : '') + '> ' + esc(label) + '</label>' +
-      (hint ? '<div class="tiny muted" style="margin-top:4px;margin-left:24px">' + esc(hint) + '</div>' : '') + '</div>';
+  function field(label, name, value, opts) { return fieldEl(label, name, value, opts).outerHTML; }
+
+  function checkboxEl(label, name, checked, hint) {
+    var box = el('input', { type: 'checkbox', name: name });
+    if (checked) box.setAttribute('checked', '');
+    return el('div', { class: 'full' }, [
+      el('label', { class: 'check' }, [box, ' ' + label]),
+      hint ? el('div', { class: 'tiny muted', style: { 'margin-top': '4px', 'margin-left': '24px' } }, hint) : null
+    ]);
   }
+
+  function checkbox(label, name, checked, hint) { return checkboxEl(label, name, checked, hint).outerHTML; }
 
   /* ---------------- gráficos SVG ---------------- */
   var PALETTE = ['#10b981', '#3b82f6', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6', '#ec4899', '#8b5cf6', '#f97316', '#06b6d4'];
 
-  function lineChart(data, opts) {
+  function lineChartEl(data, opts) {
     opts = opts || {};
     var W = 700, H = opts.height || 190, P = { t: 14, r: 12, b: 26, l: 44 };
-    if (!data.length) return '<div class="empty">Sem dados para o gráfico.</div>';
+    if (!data.length) return el('div', { class: 'empty' }, 'Sem dados para o gráfico.');
     var max = Math.max.apply(null, data.map(function (d) { return d.v; }).concat([1]));
     var innerW = W - P.l - P.r, innerH = H - P.t - P.b;
     var step = data.length > 1 ? innerW / (data.length - 1) : 0;
@@ -418,61 +550,87 @@
 
     var grid = [0, 0.5, 1].map(function (f) {
       var y = P.t + innerH - f * innerH;
-      return '<line x1="' + P.l + '" y1="' + y + '" x2="' + (W - P.r) + '" y2="' + y + '" stroke="var(--line)" stroke-width="1"/>' +
-        '<text x="' + (P.l - 7) + '" y="' + (y + 3) + '" fill="var(--text-3)" font-size="9" text-anchor="end">' + shortMoney(max * f) + '</text>';
-    }).join('');
+      return [
+        svgEl('line', { x1: P.l, y1: y, x2: W - P.r, y2: y, stroke: 'var(--line)', 'stroke-width': 1 }),
+        svgEl('text', { x: P.l - 7, y: y + 3, fill: 'var(--text-3)', 'font-size': 9, 'text-anchor': 'end' }, shortMoney(max * f))
+      ];
+    });
 
     var dots = pts.map(function (p) {
-      return '<circle cx="' + p.x + '" cy="' + p.y + '" r="3" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"><title>' +
-        esc(p.d.l + ': ' + money(p.d.v)) + '</title></circle>';
-    }).join('');
+      return svgEl('circle', { cx: p.x, cy: p.y, r: 3, fill: 'var(--accent)', stroke: 'var(--surface)', 'stroke-width': 2 },
+        svgEl('title', null, p.d.l + ': ' + money(p.d.v)));
+    });
 
     var labels = data.map(function (d, i) {
-      if (data.length > 12 && i % 2) return '';
-      var x = pts[i].x;
-      return '<text x="' + x + '" y="' + (H - 7) + '" fill="var(--text-3)" font-size="9" text-anchor="middle">' + esc(d.l) + '</text>';
-    }).join('');
+      if (data.length > 12 && i % 2) return null;
+      return svgEl('text', { x: pts[i].x, y: H - 7, fill: 'var(--text-3)', 'font-size': 9, 'text-anchor': 'middle' }, d.l);
+    });
 
-    return '<div class="chart"><svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="height:' + H + 'px">' +
-      '<defs><linearGradient id="lg1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity=".3"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>' +
-      grid +
-      '<path d="' + area + '" fill="url(#lg1)"/>' +
-      '<path d="' + line + '" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>' +
-      dots + labels + '</svg></div>';
+    var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'none', style: { height: H + 'px' } }, [
+      svgEl('defs', null, svgEl('linearGradient', { id: 'lg1', x1: 0, y1: 0, x2: 0, y2: 1 }, [
+        svgEl('stop', { offset: '0%', 'stop-color': 'var(--accent)', 'stop-opacity': '.3' }),
+        svgEl('stop', { offset: '100%', 'stop-color': 'var(--accent)', 'stop-opacity': '0' })
+      ])),
+      grid,
+      svgEl('path', { d: area, fill: 'url(#lg1)' }),
+      svgEl('path', { d: line, fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2.2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }),
+      dots, labels
+    ]);
+    return el('div', { class: 'chart' }, svg);
   }
+  function lineChart(data, opts) { return lineChartEl(data, opts).outerHTML; }
 
-  function barChart(data, opts) {
+  function barChartEl(data, opts) {
     opts = opts || {};
-    if (!data.length) return '<div class="empty">Sem dados para o gráfico.</div>';
+    if (!data.length) return el('div', { class: 'empty' }, 'Sem dados para o gráfico.');
     var max = Math.max.apply(null, data.map(function (d) { return d.v; }).concat([1]));
-    return '<div class="bar-list">' + data.map(function (d, i) {
-      var c = esc(d.c || PALETTE[i % PALETTE.length]);
-      return '<div class="bar-row"><span class="nm" title="' + esc(d.l) + '">' + esc(d.l) + '</span>' +
-        '<span class="bar-track"><span class="bar-fill" style="width:' + Math.max(2, (d.v / max) * 100) + '%;background:' + c + '"></span></span>' +
-        '<span class="vl">' + (opts.fmt === 'count' ? d.v : money(d.v)) + '</span></div>';
-    }).join('') + '</div>';
+    var list = el('div', { class: 'bar-list' }, data.map(function (d, i) {
+      var c = d.c || PALETTE[i % PALETTE.length];
+      var fillBar = el('span', { class: 'bar-fill', style: { width: Math.max(2, (d.v / max) * 100) + '%', background: c } });
+      return el('div', { class: 'bar-row' }, [
+        el('span', { class: 'nm', title: d.l }, d.l),
+        el('span', { class: 'bar-track' }, fillBar),
+        el('span', { class: 'vl' }, opts.fmt === 'count' ? String(d.v) : money(d.v))
+      ]);
+    }));
+    return list;
   }
+  function barChart(data, opts) { return barChartEl(data, opts).outerHTML; }
 
-  function donutChart(data) {
+  function donutChartEl(data) {
     var total = data.reduce(function (a, d) { return a + d.v; }, 0);
-    if (!total) return '<div class="empty">Sem dados.</div>';
+    if (!total) return el('div', { class: 'empty' }, 'Sem dados.');
     var R = 52, C = 2 * Math.PI * R, off = 0;
     var segs = data.map(function (d, i) {
       var frac = d.v / total;
-      var s = '<circle r="' + R + '" cx="70" cy="70" fill="none" stroke="' + esc(d.c || PALETTE[i % PALETTE.length]) +
-        '" stroke-width="17" stroke-dasharray="' + (frac * C).toFixed(2) + ' ' + C.toFixed(2) +
-        '" stroke-dashoffset="' + (-off * C).toFixed(2) + '" transform="rotate(-90 70 70)"><title>' + esc(d.l + ': ' + money(d.v) + ' (' + pct(frac * 100) + ')') + '</title></circle>';
+      var c = svgEl('circle', {
+        r: R, cx: 70, cy: 70, fill: 'none', stroke: d.c || PALETTE[i % PALETTE.length],
+        'stroke-width': 17,
+        'stroke-dasharray': (frac * C).toFixed(2) + ' ' + C.toFixed(2),
+        'stroke-dashoffset': (-off * C).toFixed(2),
+        transform: 'rotate(-90 70 70)'
+      }, svgEl('title', null, d.l + ': ' + money(d.v) + ' (' + pct(frac * 100) + ')'));
       off += frac;
-      return s;
-    }).join('');
-    return '<div class="row" style="gap:18px;align-items:center">' +
-      '<svg width="140" height="140" viewBox="0 0 140 140" style="flex-shrink:0">' + segs +
-      '<text x="70" y="66" text-anchor="middle" fill="var(--text-3)" font-size="9" font-weight="700">TOTAL</text>' +
-      '<text x="70" y="82" text-anchor="middle" fill="var(--text)" font-size="13" font-weight="800">' + shortMoney(total) + '</text></svg>' +
-      '<div style="flex:1;min-width:120px"><div class="legend">' + data.map(function (d, i) {
-        return '<span><i style="background:' + (d.c || PALETTE[i % PALETTE.length]) + '"></i>' + esc(d.l) + ' <b class="num" style="color:var(--text)">' + pct(d.v / total * 100) + '</b></span>';
-      }).join('') + '</div></div></div>';
+      return c;
+    });
+    var legend = el('div', { class: 'legend' }, data.map(function (d, i) {
+      return el('span', null, [
+        el('i', { style: { background: d.c || PALETTE[i % PALETTE.length] } }),
+        ' ' + d.l + ' ',
+        el('b', { class: 'num', style: { color: 'var(--text)' } }, pct(d.v / total * 100))
+      ]);
+    }));
+    var svg = svgEl('svg', { width: 140, height: 140, viewBox: '0 0 140 140', style: { 'flex-shrink': '0' } }, [
+      segs,
+      svgEl('text', { x: 70, y: 66, 'text-anchor': 'middle', fill: 'var(--text-3)', 'font-size': 9, 'font-weight': 700 }, 'TOTAL'),
+      svgEl('text', { x: 70, y: 82, 'text-anchor': 'middle', fill: 'var(--text)', 'font-size': 13, 'font-weight': 800 }, shortMoney(total))
+    ]);
+    return el('div', { class: 'row', style: { gap: '18px', 'align-items': 'center' } }, [
+      svg,
+      el('div', { style: { flex: '1', 'min-width': '120px' } }, legend)
+    ]);
   }
+  function donutChart(data) { return donutChartEl(data).outerHTML; }
 
   function shortMoney(n) {
     n = Number(n) || 0;
@@ -481,15 +639,16 @@
     return 'R$' + n.toFixed(0);
   }
 
-  function sparkline(values, color) {
-    if (!values.length) return '';
+  function sparklineEl(values, color) {
+    if (!values.length) return frag();
     var W = 100, H = 30, max = Math.max.apply(null, values.concat([1]));
     var pts = values.map(function (v, i) {
       return (values.length > 1 ? (i / (values.length - 1)) * W : W / 2).toFixed(1) + ' ' + (H - (v / max) * (H - 4) - 2).toFixed(1);
     });
-    return '<svg class="spark" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">' +
-      '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + (color || 'var(--accent)') + '" stroke-width="2" stroke-linejoin="round"/></svg>';
+    return svgEl('svg', { class: 'spark', width: W, height: H, viewBox: '0 0 ' + W + ' ' + H },
+      svgEl('polyline', { points: pts.join(' '), fill: 'none', stroke: color || 'var(--accent)', 'stroke-width': 2, 'stroke-linejoin': 'round' }));
   }
+  function sparkline(values, color) { var n = sparklineEl(values, color); return n.nodeType === 11 ? '' : n.outerHTML; }
 
   /* ---------------- Pix BR Code ---------------- */
   function pixCrc(payload) {
@@ -506,19 +665,33 @@
   function tlv(id, val) {
     if (val == null || val === '') return '';
     var v = String(val);
-    return String(id).length + String(id) + String(v.length).padStart(2, '0') + v;
+    /* EMV/BR Code usa identificadores de dois dígitos e tamanho em BYTES
+       UTF-8 (não o número de caracteres JavaScript). */
+    var bytes = unescape(encodeURIComponent(v)).length;
+    if (bytes > 99) throw new Error('Campo BR Code excede 99 bytes: ' + id);
+    return String(id).padStart(2, '0') + String(bytes).padStart(2, '0') + v;
   }
 
-  function normalizePixKey(key) {
+  function pixAscii(value, maxLength) {
+    var text = String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return text.toUpperCase().replace(/[^A-Z0-9 .,'&/()+\-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+  }  function normalizePixKey(key) {
     var k = String(key || '').trim();
     if (!k) return '';
+    /* CPF (11) e CNPJ (14) sao a chave pura, SEM DDI. O CNPJ caia no ramo
+       do telefone e virava "+55" + 14 digitos -- uma chave que nao existe. */
     if (/^\d{11}$/.test(k)) return k;
-    if (/^\d{10,14}$/.test(k)) return '+55' + k;
+    if (/^\d{14}$/.test(k)) return k;
+    if (/^\d{10}$/.test(k)) return '+55' + k;
+    /* Telefone que JA veio com o DDI (55 + DDD + numero). Nao prefixar de
+       novo: "+5511999999999" virava "+55551199999999". */
+    if (/^\+?55\d{10,11}$/.test(k)) return '+55' + k.replace(/\D/g, '').slice(2);
     var norm = k.toUpperCase()
       .replace(/[^A-Z0-9@.+-]/g, '')
       .replace(/[+.-]/g, '');
     if (/^\d+$/.test(norm) && norm.length > 10) {
-      if (norm.length === 11) return norm;
+      if (norm.length === 11 || norm.length === 14) return norm;   // CPF/CNPJ com mascara
+      if (/^55\d{10,11}$/.test(norm)) return '+55' + norm.slice(2); // DDI colado
       return '+55' + norm;
     }
     return k;
@@ -531,30 +704,35 @@
     var key = normalizePixKey(cfg.pixKey);
     if (!key) return '';
 
-    var name = (db.config.storeName || 'LOJA').toUpperCase().slice(0, 25);
-    var city = (cfg.city || 'SAO PAULO').toUpperCase().replace(/[^A-Z0-9 ]/g, '').slice(0, 15) || 'SAO PAULO';
+    var name = pixAscii(db.config.storeName, 25) || 'LOJA';
+    var city = pixAscii(cfg.city || 'SAO PAULO', 15) || 'SAO PAULO';
     var amt = round2(amount);
-    var id = '***';
+    /* Estrutura BR Code estática: conta Pix no template 26; nome, cidade,
+       moeda, valor e referência nos campos externos correspondentes. */
+    var mai = tlv('00', 'BR.GOV.BCB.PIX') + tlv('01', key);
+    var reference = String(txid || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 25) || '***';
+    var additional = tlv('05', reference);
+    var payload =
+      tlv('00', '01') +
+      tlv('26', mai) +
+      tlv('52', '0000') +
+      tlv('53', '986') +
+      (amt > 0 ? tlv('54', amt.toFixed(2)) : '') +
+      tlv('58', 'BR') +
+      tlv('59', name) +
+      tlv('60', city) +
+      tlv('62', additional);
 
-    var mai =
-      tlv('00', 'BR.GOV.BCB.PIX') +
-      tlv('01', key) +
-      tlv('02', amt > 0 ? amt.toFixed(2) : '') +
-      tlv('03', amt > 0 ? 'SUDAM' + txid : '') +
-      tlv('04', amt > 0 ? 'PDV' + txid : '') +
-      tlv('05', name) +
-      tlv('06', city) +
-      tlv('07', '***');
-
-    return mai + '6304' + pixCrc(mai + '6304') + id;
+    return payload + '6304' + pixCrc(payload + '6304');
   }
 
   function renderPixQr(container, amount, txid) {
     if (!container) return;
     var payload = pixPayload(amount, txid);
-    container.innerHTML = '';
+    fill(container, null);
     if (!payload) {
-      container.innerHTML = '<div class="tiny muted" style="padding:14px">Configure a chave Pix em Configurações → Fiscal.</div>';
+      append(container, el('div', { class: 'tiny muted', style: { padding: '14px' } },
+        'Configure a chave Pix em Configurações → Fiscal.'));
       return;
     }
     /* QR.render já faz o try/catch e devolve false em falha — o fallback
@@ -563,10 +741,7 @@
       tamanho: 170, escuro: '#0d1520', claro: '#ffffff'
     });
     if (drew) { container.dataset.payload = payload; return; }
-    var pre = document.createElement('div');
-    pre.className = 'pix-copy';
-    pre.textContent = payload;
-    container.appendChild(pre);
+    append(container, el('div', { class: 'pix-copy' }, payload));
     container.dataset.payload = payload;
   }
 
@@ -596,10 +771,14 @@
       'button{margin:8px auto;display:block;padding:7px 16px;font:inherit;cursor:pointer}' +
       '@media print{button{display:none}}' +
       '</style></head><body>' + html +
-      '<button onclick="window.print()">Imprimir</button>' +
-      '<script>window.addEventListener("load",function(){setTimeout(function(){window.print()},180)})<\/script>' +
+      '<button id="print-receipt">Imprimir</button>' +
       '</body></html>');
     w.document.close();
+    /* A CSP do app bloqueia handlers e scripts inline. Registre os eventos
+       pelo documento de origem, que compartilha a origem do about:blank. */
+    var botaoImprimir = w.document.getElementById('print-receipt');
+    if (botaoImprimir) botaoImprimir.addEventListener('click', function () { w.print(); });
+    w.addEventListener('afterprint', function () { w.close(); }, { once: true });
     return true;
   }
 
@@ -651,13 +830,14 @@
   }
 
   global.UI = {
-    icon: icon, PALETTE: PALETTE, LUCIDE: L,
+    icon: icon, iconEl: iconEl, PALETTE: PALETTE, LUCIDE: L,
     money: money, num: num, pct: pct, parseNum: parseNum, round2: round2,
     dt: dt, dateOnly: dateOnly, today: today, daysBetween: daysBetween, esc: esc,
-    $: $, $$: $$, el: el,
-    toast: toast, modal: modal, confirm: confirm, promptText: promptText,
-    formData: formData, field: field, checkbox: checkbox,
+    $: $, $$: $$, el: el, h: el, svg: svgEl, frag: frag, fill: fill, appendBody: appendBody,
+    toast: toast, modal: modal, confirm: confirm, promptText: promptText, modalAberto: modalAberto,
+    formData: formData, field: field, fieldEl: fieldEl, checkbox: checkbox, checkboxEl: checkboxEl,
     lineChart: lineChart, barChart: barChart, donutChart: donutChart, sparkline: sparkline, shortMoney: shortMoney,
+    lineChartEl: lineChartEl, barChartEl: barChartEl, donutChartEl: donutChartEl, sparklineEl: sparklineEl,
     pixPayload: pixPayload, renderPixQr: renderPixQr, copyPix: copyPix, normalizePixKey: normalizePixKey,
     printHTML: printHTML, download: download, downloadCSV: downloadCSV,
     openImportDialog: openImportDialog, downloadBackup: downloadBackup

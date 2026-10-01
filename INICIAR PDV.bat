@@ -59,6 +59,16 @@ exit /b 1
 
 :versaoOk
 
+rem Sem TLS, a inicializacao local nao expoe credenciais aos outros dispositivos.
+rem Acesso pela rede exige certificado configurado antes de iniciar.
+if "%SUDAM_TLS%"=="1" (
+  set "SUDAM_HOST=0.0.0.0"
+  set "SUDAM_PROBE_URL=https://127.0.0.1:8787/api/base"
+) else (
+  set "SUDAM_HOST=127.0.0.1"
+  set "SUDAM_PROBE_URL=http://127.0.0.1:8787/api/base"
+)
+
 rem Sobe o servidor so se ja nao estiver no ar (evita porta ocupada
 rem quando o usuario abre o atalho duas vezes).
 rem A busca e pela porta, entao elaTAMBEEM acha qualquer outro programa
@@ -82,7 +92,7 @@ set /a TENTATIVAS=0
 :espera
 timeout /t 1 /nobreak >nul
 set /a TENTATIVAS+=1
-node -e "require('http').get('http://127.0.0.1:8787/api/base',function(r){process.exit(r.statusCode===401?0:1)}).on('error',function(){process.exit(1)})" >nul 2>nul
+node -e "process.env.NODE_TLS_REJECT_UNAUTHORIZED='0';var u=new URL(process.env.SUDAM_PROBE_URL);var h=require(u.protocol==='https:'?'https':'http');h.get(u,function(r){process.exit(r.statusCode===401?0:1)}).on('error',function(){process.exit(1)})" >nul 2>nul
 if not errorlevel 1 goto abrir
 if %TENTATIVAS% GEQ 20 (
   echo.
@@ -98,7 +108,7 @@ goto espera
 rem Alguem ja escuta na 8787, mas pode ser outro programa. A impressao
 rem digital e a mesma do teste acima: 401 em /api/base e o PDV; qualquer outra
 rem resposta e ocupante estranho.
-node -e "require('http').get('http://127.0.0.1:8787/api/base',function(r){process.exit(r.statusCode===401?0:1)}).on('error',function(){process.exit(1)})" >nul 2>nul
+node -e "process.env.NODE_TLS_REJECT_UNAUTHORIZED='0';var u=new URL(process.env.SUDAM_PROBE_URL);var h=require(u.protocol==='https:'?'https':'http');h.get(u,function(r){process.exit(r.statusCode===401?0:1)}).on('error',function(){process.exit(1)})" >nul 2>nul
 if not errorlevel 1 goto abrir
 echo.
 echo   A porta 8787 esta ocupada por OUTRO programa, e nao pelo PDV.
@@ -111,9 +121,16 @@ exit /b 1
 
 :abrir
 echo.
-echo   PDV no ar em:  http://localhost:8787
-echo   Para os outros caixas, use o IP que o servidor mostrar no inicio.
+if "%SUDAM_TLS%"=="1" goto abrirTls
+echo   PDV local em:   http://localhost:8787
+echo   Sem TLS, o servidor aceita conexoes apenas deste computador.
+start "" "http://localhost:8787"
+goto fim
+:abrirTls
+echo   PDV seguro em:  https://localhost:8787
+echo   Com TLS, os outros caixas podem usar o IP do servidor.
+start "" "https://localhost:8787"
+:fim
 echo   Para fechar tudo, feche a janela "Sudam PDV - Servidor".
 echo.
-start "" "http://localhost:8787"
 endlocal

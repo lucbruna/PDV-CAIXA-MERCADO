@@ -193,7 +193,9 @@
       estado.online = r.status === 200;
       if (r.status === 200) {
         estado.migrado = !!r.dados.migrado;
+        estado.configurado = r.dados.configurado !== false;
         estado.versao = r.dados.versao;
+        estado.caixasAbertos = Number(r.dados.caixasAbertos) || 0;
       }
       return estado.online;
     });
@@ -214,6 +216,22 @@
         estado.ultimoErro = r.dados.erro || 'Não foi possível entrar.';
         return { ok: false, erro: estado.ultimoErro };
       });
+  }
+
+  function alterarSenha(atual, nova) {
+    return req('POST', '/api/senha', { atual: atual, nova: nova }).then(function (r) {
+      return r.status === 200
+        ? { ok: true }
+        : { ok: false, erro: r.dados.erro || 'Nao foi possivel alterar a senha.' };
+    });
+  }
+
+  function criarUsuario(usuario) {
+    return req('POST', '/api/usuarios', usuario).then(function (r) {
+      return r.status === 201
+        ? { ok: true, usuario: r.dados.usuario }
+        : { ok: false, erro: r.dados.erro || 'Nao foi possivel criar o usuario.' };
+    });
   }
 
   function logout() {
@@ -287,6 +305,24 @@
     });
   }
 
+  /* Catalogo leve, so para reconciliar estoque e preco em ritmo proprio.
+     O /api/base inteiro traria clientes, config e turnos de brinde a cada
+     ciclo -- desperdicio para quem so quer o estoque de agora. */
+  function produtos() {
+    return req('GET', '/api/produtos', undefined, undefined, 8000).then(function (r) {
+      if (r.status !== 200) return null;
+      estado.online = true;
+      return r.dados.produtos || [];
+    }).catch(function () { return null; });
+  }
+
+  /* Ha item deste tipo esperando na fila de reenvio? A reconciliacao usa isso
+     para NAO aplicar o dado do servidor por cima de um cadastro local que
+     ainda nao subiu -- senao a edicao do gerente some antes de chegar. */
+  function temPendencia(tipo) {
+    return lerPendentes().some(function (i) { return String(i.tipo) === String(tipo); });
+  }
+
   function vendas(opts) {
     opts = opts || {};
     var q = '/api/vendas?limite=' + (opts.limite || 500) + '&offset=' + (opts.offset || 0);
@@ -357,6 +393,31 @@
       });
   }
 
+  function salvarConfig(config) {
+    return req('POST', '/api/config', { config: config }).then(function (r) {
+      if (r.status === 200) return { ok: true };
+      if (r.status === 401) { guardarToken(null); estado.autenticado = false; }
+      return { ok: false, erro: r.dados.erro || 'Falha ao sincronizar configuracao.' };
+    }).catch(function () { return { ok: false, erro: 'Servidor indisponivel.' }; });
+  }
+
+  function backupStatus() {
+    return req('GET', '/api/backup/status').then(function (r) { return r.status === 200 ? r.dados.backup : null; }).catch(function () { return null; });
+  }
+
+  function abrirTurno(id, opening) {
+    return req('POST', '/api/caixa/abrir', { id: id, opening: opening }).then(function (r) {
+      if (r.status === 200) return { ok: true, turno: r.dados.turno };
+      return { ok: false, erro: r.dados.erro || 'Nao foi possivel abrir o caixa.', status: r.status };
+    }).catch(function () { return { ok: false, erro: 'Servidor indisponivel.' }; });
+  }
+
+  function fecharTurno(id, contado, detalhes) {
+    return req('POST', '/api/caixa/fechar', Object.assign({ id: id, contado: contado }, detalhes || {})).then(function (r) {
+      if (r.status === 200) return { ok: true, turno: r.dados.turno };
+      return { ok: false, erro: r.dados.erro || 'Nao foi possivel fechar o caixa.', status: r.status };
+    }).catch(function () { return { ok: false, erro: 'Servidor indisponivel.' }; });
+  }
   function salvar(colecao, lista, opcoes) {
     opcoes = opcoes || {};
     return req('POST', '/api/' + colecao, { lista: lista }).then(function (r) {
@@ -485,17 +546,26 @@
   global.API = {
     estado: estado,
     status: status,
+    precisaInicializar: function () { return estado.online && estado.configurado === false; },
     login: login,
+    alterarSenha: alterarSenha,
+    criarUsuario: criarUsuario,
     logout: logout,
     sessaoValida: sessaoValida,
     minutosParaExpirar: minutosParaExpirar,
     manterSessaoViva: manterSessaoViva,
     aoCairSessao: aoCairSessao,
     base: base_,
+    produtos: produtos,
+    temPendencia: temPendencia,
     vendas: vendas,
     venda: venda,
     estornar: estornar,
     salvar: salvar,
+    backupStatus: backupStatus,
+    abrirTurno: abrirTurno,
+    fecharTurno: fecharTurno,
+    salvarConfig: salvarConfig,
     migrar: migrar,
     migrado: migrado,
     reenviar: reenviar,

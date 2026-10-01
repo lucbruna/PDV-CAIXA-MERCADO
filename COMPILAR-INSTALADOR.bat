@@ -13,6 +13,13 @@ if not defined ISCC (
 )
 "%ISCC%" "%~dp0instalador.iss"
 if errorlevel 1 exit /b %errorlevel%
+rem Le a versao do proprio .iss para o aviso nao mentir quando ela subir.
+set "VER="
+for /f "tokens=3" %%v in ('findstr /b /c:"#define AppVersion" "%~dp0instalador.iss"') do set "VER=%%~v"
 echo.
-echo Instalador criado em: "%~dp0dist\Sudam-Gestao-PDV-Setup-1.0.0.exe"
+if defined VER (
+  echo Instalador criado em: "%~dp0dist\Sudam-Gestao-PDV-Setup-%VER%.exe"
+) else (
+  echo Instalador criado na pasta: "%~dp0dist"
+)
 pause

@@ -8,19 +8,29 @@ import { DatabaseSync } from 'node:sqlite';
 import { scryptSync, randomBytes } from 'node:crypto';
 
 const W = process.argv[2];
-const PORTA = 8787;
+/* Porta dedicada, longe da 8787 de producao. Com a porta padrao, se ja
+   houvesse um PDV de verdade no ar, o spawn falhava em EADDRINUSE e o teste
+   passava a conversar com o servidor do gerente -- gravando cliente e venda
+   de teste no banco REAL. Foi o que aconteceu uma vez. */
+const PORTA = 8798;
 const BASE = `http://127.0.0.1:${PORTA}`;
 const DB = join(W, 'sync.db');
 for (const s of ['', '-wal', '-shm']) { try { rmSync(DB + s); } catch {} }
 
 const srv = spawn(process.execPath, ['servidor.mjs'], {
   cwd: process.argv[3],
-  env: { ...process.env, SUDAM_DB: DB, SUDAM_PORTA: String(PORTA) },
+  env: { ...process.env, SUDAM_DB: DB, SUDAM_PORTA: String(PORTA), SUDAM_HOST: '127.0.0.1' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 srv.stdout.on('data', () => {});
 srv.stderr.on('data', (d) => process.stderr.write('[srv] ' + d));
 await new Promise((r) => setTimeout(r, 1500));
+/* Se o nosso servidor nao subiu, nao seguimos: as requisicoes iriam para quem
+   estivesse escutando na porta, e nao para o banco de teste. */
+if (srv.exitCode !== null) {
+  console.error('Servidor de teste nao subiu (porta ' + PORTA + ' ocupada?). Abortando sem gravar nada.');
+  process.exit(1);
+}
 
 let ok = 0, fail = 0;
 const check = (n, c, e = '') => { if (c) { ok++; console.log('  PASS  ' + n); } else { fail++; console.log('  FAIL  ' + n + (e ? ' :: ' + e : '')); } };

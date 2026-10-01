@@ -7,7 +7,7 @@ Decidido com o cliente em 2026-09-28. Substitui o modelo local-only.
 | Tema | Escolha | Motivo |
 |---|---|---|
 | Servidor | Mini PC na loja, rodando Node + SQLite | Custo R$ 0; não depende de internet |
-| Clientes | 5 caixas abrem `http://IP:8787` no Chrome | Nada a instalar nos caixas |
+| Clientes | 5 caixas abrem o endereço HTTPS do mini PC no Chrome | Nada a instalar nos caixas |
 | Internet cai | Não afeta o sistema | Tudo trafega na rede local, não na internet |
 | Fiscal | Não emite NFC-e/MFE | Controle interno |
 | Dependências | Zero | `node:sqlite` já vem no Node 22+ |
@@ -34,7 +34,7 @@ de existir (SQLite em disco) e os 5 caixas passam a ler a mesma verdade.
    │      ├─ backup automatico diario             │
    │      └─ serve o proprio app (html/css/js)    │
    └──────────────┬───────────────────────────────┘
-                  │  http://192.168.0.10:8787
+                  │  https://192.168.0.10/
      ┌────────┬───┴───┬────────┬────────┐
    CAIXA 1 CAIXA 2  CAIXA 3  CAIXA 4  CAIXA 5
 ```

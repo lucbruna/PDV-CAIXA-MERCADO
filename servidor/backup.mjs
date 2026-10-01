@@ -2,11 +2,12 @@
  *
  * O mini PC da loja e um Windows comum: ele trava, o disco enche, a energia
  * acaba. A defesa aqui e simples de proposito -- um arquivo .db por dia, com
- * os ultimos 30 dias, mais um backup a cada hora. O objetivo e que existam
+ * as ultimas 24 horas, mais um backup diario por 30 dias. O objetivo e que existam
  * varias copias buenas, e nao um sistema sofisticado que o gerente precise
  * lembrar de acionar.
  */
 import { copyFileSync, mkdirSync, readdirSync, statSync, unlinkSync, existsSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { caminhoBanco, caminhoBackup } from './banco.mjs';
@@ -15,12 +16,20 @@ const aqui = dirname(fileURLToPath(import.meta.url));
 /* A pasta acompanha o banco (ver caminhoBackup em banco.mjs). Com SUDAM_DB
    apontando para outro disco, o backup vai para o lado daquele banco. */
 const PASTA = caminhoBackup();
+const PASTA_ESPELHO = process.env.SUDAM_BACKUP_ESPELHO || '';
 const DIAS = 30;
+const HORAS_RECENTES = 24;
+let ultimoSucesso = null;
+let ultimaFalha = null;
+let falhaEspelho = null;
 
+/* Carimbo com segundos: o backup roda no boot, a cada hora e no desligamento,
+   e duas dessas chamadas podem cair no mesmo minuto. Com VACUUM INTO o nome
+   nao pode repetir (o arquivo tem de nao existir), dai a resolucao extra. */
 function carimbo() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
 /* O nome real gravado em `fazer()` e `sudam.<carimbo>` (e `sudam-wal.<carimbo>`
@@ -28,67 +37,127 @@ function carimbo() {
  * copia era apagada e a pasta crescia 2 arquivos por hora, ~17 mil por ano. No
  * mini PC da loja, que costuma ser um SSD de 120 GB com o sistema em cima, o
  * disco enche e o PDV para. A lista precisa casar com o que `fazer()` grava. */
-const PREFIXO_DB = 'sudam.';
 
 function fazer(db) {
   mkdirSync(PASTA, { recursive: true });
-  /* O checkpoint vem ANTES da copia, em todos os caminhos (primeira carga,
-     hora, desligamento). Sem ele o .db pode estar atrasado em relacao ao que
-     ainda esta no WAL, e quem restaura sem o -wal perde as ultimas vendas.
-     Com o checkpoint, o .db sozinho ja e um banco fechado e consistente. */
+  const destino = join(PASTA, 'sudam.' + carimbo());
+
+  /* Caminho preferido: VACUUM INTO. O SQLite escreve a copia inteira em UM
+     arquivo, ja como um banco fechado -- e a unica forma de nao existir uma
+     janela em que o .db e o -wal nao batem (uma venda entrando entre copiar
+     um e outro). Quem restaura copia um arquivo so, sem se preocupar com WAL. */
+  if (db) {
+    try {
+      if (existsSync(destino)) unlinkSync(destino);
+      db.exec("VACUUM INTO '" + destino.replace(/'/g, "''") + "'");
+      verificarArquivo(destino);
+      espelhar(destino);
+      limpar(PASTA);
+      ultimoSucesso = new Date().toISOString(); ultimaFalha = null;
+      return;
+    } catch (e) {
+      try { if (existsSync(destino)) unlinkSync(destino); } catch {}
+      ultimaFalha = e.message;
+      console.error('[backup] VACUUM INTO falhou, copiando o arquivo:', e.message);
+    }
+  }
+
+  /* Reserva (banco indisponivel ou somente leitura): copia o par .db/-wal.
+     O checkpoint vem antes para o .db sozinho ja ser um banco fechado, e a
+     ordem de copia e a segura: primeiro o .db, depois o -wal. Assim o WAL
+     copiado nunca e mais velho que o banco. */
   if (db) {
     try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
   }
-  /* O .db e copiado junto do -wal; ainda assim o WAL vai junto porque a copia
-     leva alguns milissegundos e uma venda pode entrar nesse meio-tempo. A ordem
-     importa e e a segura: primeiro o .db, depois o -wal. Assim o WAL copiado e
-     sempre mais novo ou igual ao .db, e o SQLite replaya os frames ate o ultimo
-     commit completo. Copiar na ordem contraria produziria um par inconsistente.
-     O -shm NAO e copiado: ele e um indice de memoria compartilhada, recriado
-     pelo proprio SQLite quando o banco abre, e guardar uma copia parada so
-     ocupa espaco e confunde quem for restaurar. */
-  for (const sufixo of ['', '-wal']) {
-    const origem = caminhoBanco() + sufixo;
-    if (existsSync(origem)) {
-      copyFileSync(origem, join(PASTA, 'sudam' + sufixo + '.' + carimbo()));
-    }
+  const marcaFallback = carimbo();
+  const arquivoFallback = join(PASTA, 'sudam.' + marcaFallback);
+  const origemBanco = caminhoBanco();
+  if (!existsSync(origemBanco)) throw new Error('arquivo do banco nao encontrado para backup');
+  copyFileSync(origemBanco, arquivoFallback);
+  if (existsSync(origemBanco + '-wal')) copyFileSync(origemBanco + '-wal', arquivoFallback + '-wal');
+  if (existsSync(origemBanco + '-shm')) copyFileSync(origemBanco + '-shm', arquivoFallback + '-shm');
+  /* Consolida WAL da copia (se checkpoint do banco ativo estava ocupado) e
+     deixa o snapshot independente, como no caminho VACUUM INTO. */
+  try {
+    const recuperada = new DatabaseSync(arquivoFallback);
+    try {
+      const checkpoint = recuperada.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get();
+      if (checkpoint && Number(checkpoint.busy) !== 0) throw new Error('nao foi possivel consolidar o WAL do backup');
+    } finally { recuperada.close(); }
+    for (const sufixo of ['-wal', '-shm']) { try { unlinkSync(arquivoFallback + sufixo); } catch {} }
+    verificarArquivo(arquivoFallback);
+  } catch (e) {
+    for (const sufixo of ['', '-wal', '-shm']) { try { unlinkSync(arquivoFallback + sufixo); } catch {} }
+    throw e;
   }
-  limpar();
+  espelhar(arquivoFallback);
+  limpar(PASTA); ultimoSucesso = new Date().toISOString(); ultimaFalha = null;
 }
 
-function limpar() {
-  const todos = readdirSync(PASTA);
-  /* Um backup por dia, mantendo DIAS dias. */
+function verificarArquivo(arquivo) {
+  const copia = new DatabaseSync(arquivo, { readOnly: true });
+  try {
+    const resultado = copia.prepare('PRAGMA integrity_check').get();
+    if (!resultado || resultado.integrity_check !== 'ok') throw new Error('integrity_check da copia nao retornou ok');
+  } finally { copia.close(); }
+}
+
+function espelhar(arquivo) {
+  falhaEspelho = null;
+  if (!PASTA_ESPELHO || PASTA_ESPELHO === PASTA) return;
+  try {
+    mkdirSync(PASTA_ESPELHO, { recursive: true });
+    const destino = join(PASTA_ESPELHO, arquivo.split(/[\\/]/).pop());
+    copyFileSync(arquivo, destino);
+    verificarArquivo(destino);
+    limpar(PASTA_ESPELHO);
+  } catch (e) {
+    try { unlinkSync(join(PASTA_ESPELHO, arquivo.split(/[\\/]/).pop())); } catch {}
+    falhaEspelho = e.message; console.error('[backup] espelho externo falhou:', e.message);
+  }
+}
+
+function limpar(pasta) {
+  pasta = pasta || PASTA;
+  const todos = readdirSync(pasta);
+  const validos = todos.filter((f) => /^sudam\.\d{4}-\d{2}-\d{2}_\d{6}$/.test(f))
+    .map((nome) => ({ nome, caminho: join(pasta, nome), data: nome.slice(6) }))
+    .sort((a, b) => a.data.localeCompare(b.data));
+  const recentes = new Set(validos.slice(-HORAS_RECENTES).map((x) => x.nome));
   const porDia = new Map();
-  for (const f of todos) {
-    if (!f.startsWith(PREFIXO_DB) || f.startsWith(PREFIXO_DB + '-wal.')) continue;
-    const dia = f.slice(PREFIXO_DB.length).split('_')[0];
-    porDia.set(dia, f);
-  }
+  for (const item of validos) porDia.set(item.data.slice(0, 10), item.nome);
   const dias = [...porDia.keys()].sort();
-  const sobra = dias.slice(0, Math.max(0, dias.length - DIAS));
-  for (const dia of sobra) {
-    for (const f of todos.filter((x) => x.startsWith(PREFIXO_DB + dia))) {
-      try { unlinkSync(join(PASTA, f)); } catch {}
-    }
+  const diasMantidos = new Set(dias.slice(-DIAS));
+  const manter = new Set(recentes);
+  for (const dia of diasMantidos) manter.add(porDia.get(dia));
+  for (const item of validos) if (!manter.has(item.nome)) {
+    try { unlinkSync(item.caminho); } catch {}
+    for (const sufixo of ['-wal', '-shm']) { try { unlinkSync(item.caminho + sufixo); } catch {} }
   }
-  /* Arquivos -wal velhos que ficaram sem o .db correspondente. */
   for (const f of todos) {
     if (f.startsWith('sudam-wal.')) {
-      const base = f.replace('-wal.', '.');
-      if (!existsSync(join(PASTA, base))) {
-        try { unlinkSync(join(PASTA, f)); } catch {}
-      }
+      const base = f.replace('sudam-wal.', 'sudam.');
+      if (!existsSync(join(pasta, base))) { try { unlinkSync(join(pasta, f)); } catch {} }
     }
+    if (f.startsWith('sudam.tmp-')) { try { unlinkSync(join(pasta, f)); } catch {} }
   }
 }
 
 export function iniciarBackup(db) {
-  try { fazer(db); } catch (e) { console.error('[backup] falha na copia inicial:', e.message); }
+  try { fazer(db); } catch (e) { ultimaFalha = e.message; console.error('[backup] falha na copia inicial:', e.message); }
   setInterval(() => {
-    try { fazer(db); } catch (e) { console.error('[backup] falha:', e.message); }
+    try { fazer(db); } catch (e) { ultimaFalha = e.message; console.error('[backup] falha:', e.message); }
   }, 60 * 60 * 1000).unref?.();
   console.log('  backup automatico a cada hora em: ' + PASTA);
+}
+
+export function estadoBackup() {
+  let arquivos = [];
+  try { arquivos = readdirSync(PASTA).filter((f) => /^sudam\.\d{4}-\d{2}-\d{2}_\d{6}$/.test(f)); } catch {}
+  const maisNovo = arquivos.map((f) => ({ f, m: statSync(join(PASTA, f)).mtimeMs })).sort((a, b) => b.m - a.m)[0];
+  let copiasEspelho = 0;
+  try { if (PASTA_ESPELHO) copiasEspelho = readdirSync(PASTA_ESPELHO).filter((f) => /^sudam\.\d{4}-\d{2}-\d{2}_\d{6}$/.test(f)).length; } catch {}
+  return { ultimoSucesso, ultimoArquivo: maisNovo ? new Date(maisNovo.m).toISOString() : null, quantidade: arquivos.length, falha: ultimaFalha, espelhoAtivo: !!PASTA_ESPELHO, copiasEspelho, falhaEspelho };
 }
 
 export { PASTA as PASTA_BACKUP, fazer as fazerBackupAgora };

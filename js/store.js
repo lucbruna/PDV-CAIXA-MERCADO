@@ -156,6 +156,18 @@
       paymentMethods: ['Dinheiro', 'Pix', 'Débito', 'Crédito', 'Crediário'],
       theme: 'dark',
       taxRegime: 'Simples Nacional',
+      municipalRegistration: '',
+      crt: '',
+      cnae: '',
+      municipalityCode: '',
+      state: '',
+      city: '',
+      district: '',
+      zipCode: '',
+      addressNumber: '',
+      addressComplement: '',
+      fiscalEmail: '',
+      fiscalPhone: '',
       cashOpening: 50,
       printWidth: 80,
       allowNegativeStock: false,
@@ -256,6 +268,19 @@
       p.cost = Number(p.cost) || 0;
       p.price = Number(p.price) || 0;
       p.stock = Number(p.stock) || 0;
+      if (p.stockDeposit == null && p.stockSales == null) {
+        p.stockDeposit = p.stockArea === 'venda' ? 0 : p.stock;
+        p.stockSales = p.stockArea === 'venda' ? p.stock : 0;
+      } else { p.stockDeposit = Number(p.stockDeposit) || 0; p.stockSales = Number(p.stockSales) || 0; }
+      p.stock = Math.round((p.stockDeposit + p.stockSales) * 1000) / 1000;
+      if (p.depositAisle == null) {
+        p.depositAisle = p.stockArea === 'venda' ? '' : (p.stockAisle || '');
+        p.depositShelf = p.stockArea === 'venda' ? '' : (p.stockShelf || '');
+        p.depositHeight = p.stockArea === 'venda' ? '' : (p.stockHeight || '');
+        p.salesAisle = p.stockArea === 'venda' ? (p.stockAisle || '') : '';
+        p.salesShelf = p.stockArea === 'venda' ? (p.stockShelf || '') : '';
+        p.salesHeight = p.stockArea === 'venda' ? (p.stockHeight || '') : '';
+      }
       p.min = Number(p.min != null ? p.min : p.minStock) || 0;
       p.unit = p.unit || 'un';
       p.name = String(p.name || 'Sem nome');
@@ -266,7 +291,14 @@
       p.ncm = p.ncm || '';
       p.cfop = p.cfop || '5102';
       p.csosn = p.csosn || '102';
+      p.cest = p.cest || '';
+      p.origin = p.origin || '0';
+      p.cst = p.cst || ''; p.pisCst = p.pisCst || ''; p.cofinsCst = p.cofinsCst || '';
       p.expiry = p.expiry || '';
+      /* Preco promocional com janela de validade. Vazio/0 = sem promo. */
+      p.promoPrice = Number(p.promoPrice) || 0;
+      p.promoFrom = p.promoFrom || '';
+      p.promoTo = p.promoTo || '';
       return p;
     });
 
@@ -475,13 +507,32 @@
       var l = login(username, pass);
       return Promise.resolve(l ? { ok: true, usuario: l } : { ok: false, erro: 'Usuário ou senha incorretos.' });
     }
-    return loginServidor(username, pass).then(function (res) {
+    /* Em uma instalação nova, o banco do servidor começa sem usuários. O
+       login padrão existe apenas no localStorage do primeiro navegador; sem
+       esta migração automática, ninguém consegue entrar para abrir Ajustes. */
+    return API.status().catch(function () { return false; }).then(function () {
+      if (!API.precisaInicializar || !API.precisaInicializar()) return null;
+      return API.migrar(db).then(function (r) {
+        return r && r.ok ? null : { erro: (r && r.erro) || 'Não foi possível inicializar os usuários do servidor.' };
+      }).catch(function () { return { erro: 'Não foi possível inicializar os usuários do servidor.' }; });
+    }).then(function (inicio) {
+      if (inicio && inicio.erro) return inicio;
+      return loginServidor(username, pass);
+    }).then(function (res) {
       if (res && !res.erro) {
-        // Sincroniza o usuario no cache local para currentUser() funcionar.
+        // A conta pode ter sido criada em outro caixa. O servidor devolve os
+        // dados publicos no login; cacheie-os para Store.currentUser funcionar.
+        var remoto = res.usuario || {};
         var u = db.auth.users.find(function (x) {
-          return x.username.toLowerCase() === String(username || '').trim().toLowerCase() && x.active;
+          return x.username.toLowerCase() === String(username || '').trim().toLowerCase();
         });
-        if (u) { db.auth.currentId = u.id; save(); }
+        if (!u && remoto.username) {
+          u = { id: remoto.id || uid('u'), name: remoto.name || remoto.username,
+            username: remoto.username, role: remoto.role || 'caixa',
+            active: remoto.active !== false, passHash: '' };
+          db.auth.users.push(u);
+        }
+        if (u) { u.active = true; db.auth.currentId = u.id; save(); }
         // A partir daqui a sessao precisa se manter viva sozinha: quem opera
         // o dia inteiro nao pode ver uma venda cair em 401 so porque fez
         // Almoco. A sondagem leve renova o token e avisa se ele morrer.
@@ -508,9 +559,9 @@
   }
 
   /* ---------------- turnos de caixa ---------------- */
-  function openShift(opening) {
+  function openShift(opening, turnoServidor) {
     var u = currentUser();
-    var s = {
+    var s = Object.assign({
       id: uid('sh'),
       operatorId: u ? u.id : null,
       operator: u ? u.name : (db.operator || 'Operador'),
@@ -523,7 +574,7 @@
       counted: null,
       difference: null,
       blind: false
-    };
+    }, turnoServidor || {});
     db.shifts.unshift(s);
     db.shift = s;
     save();
@@ -551,6 +602,30 @@
   function marginOf(p) {
     if (!p || !p.cost) return 0;
     return Math.round(((p.price - p.cost) / p.cost) * 1000) / 10;
+  }
+
+  /* Data de hoje no formato YYYY-MM-DD, que e como os <input type="date">
+     guardam a janela da promocao. Comparar as strings nesse formato ordena
+     igual a comparar as datas. */
+  function hojeISO() {
+    var d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') +
+      '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  /* Uma promocao vale quando tem preco e hoje cai dentro da janela. Sem data
+     de inicio/fim, vale por tempo indeterminado. */
+  function promoVigente(p, ref) {
+    if (!p || !(Number(p.promoPrice) > 0)) return false;
+    var hoje = ref || hojeISO();
+    if (p.promoFrom && hoje < p.promoFrom) return false;
+    if (p.promoTo && hoje > p.promoTo) return false;
+    return true;
+  }
+
+  /* Preco que o caixa deve usar: promocional quando vigente, senao o normal. */
+  function precoVigente(p) {
+    return promoVigente(p) ? Number(p.promoPrice) : (Number(p.price) || 0);
   }
 
   function productByBarcode(code) {
@@ -624,21 +699,119 @@
     if (envios.length) Promise.all(envios);
   }
 
+  function normalizarLocalizacao(p) {
+    if (!p) return p;
+    if (p.stockDeposit == null && p.stockSales == null) {
+      p.stockDeposit = p.stockArea === 'venda' ? 0 : (Number(p.stock) || 0);
+      p.stockSales = p.stockArea === 'venda' ? (Number(p.stock) || 0) : 0;
+    } else {
+      p.stockDeposit = Number(p.stockDeposit) || 0;
+      p.stockSales = Number(p.stockSales) || 0;
+    }
+    return p;
+  }
+
   /* Baixa produtos/clientes/config do servidor e substitui o local. Chamado
      depois do login, para que os 5 caixas partam da mesma verdade. */
   function puxarDoServidor() {
     if (!temServidor()) return Promise.resolve({ ok: false, motivo: 'sem servidor' });
     return API.base().then(function (b) {
       if (!b) return { ok: false, motivo: 'sem resposta' };
-      if (Array.isArray(b.produtos) && b.produtos.length) db.products = b.produtos;
+      if (Array.isArray(b.produtos) && b.produtos.length) db.products = b.produtos.map(normalizarLocalizacao);
       if (Array.isArray(b.clientes)) db.customers = b.clientes;
-      if (Array.isArray(b.fornecedores) && b.fornecedores.length) db.suppliers = b.fornecedores;
+      if (Array.isArray(b.fornecedores)) db.suppliers = b.fornecedores;
+      if (Array.isArray(b.compras)) db.purchases = b.compras;
+      if (Array.isArray(b.lancamentos)) db.entries = b.lancamentos;
+      if (Array.isArray(b.turnos)) {
+        db.shifts = b.turnos;
+        var usuarioAtual = currentUser();
+        var aberto = b.turnos.find(function (t) { return !t.closedAt && usuarioAtual && String(t.operatorId) === String(usuarioAtual.id); });
+        if (usuarioAtual) db.shift = aberto || null;
+      }
+      if (Array.isArray(b.usuarios)) {
+        var usuariosLocais = db.auth.users || [];
+        /* Quem esta logado agora, pelo username -- o id local (seed `u_admin`)
+           pode nao existir no servidor. */
+        var logadoAgora = usuariosLocais.find(function (u) { return u.id === db.auth.currentId; });
+        var usernameLogado = logadoAgora ? logadoAgora.username : null;
+        db.auth.users = b.usuarios.map(function (remoto) {
+          var local = usuariosLocais.find(function (u) { return u.id === remoto.id || u.username === remoto.username; });
+          return Object.assign({}, remoto, { passHash: local ? local.passHash : '' });
+        });
+        /* Remapeia o usuario logado para o id do servidor. Sem isto, um caixa
+           que entrou pelo id local (u_admin/u_caixa1) fica com currentId
+           apontando para um usuario que a lista do servidor nao tem -- e
+           currentUser() devolve null, derrubando permissoes e o operador da
+           venda logo depois do login. */
+        if (usernameLogado) {
+          var atualizado = db.auth.users.find(function (u) {
+            return String(u.username).toLowerCase() === String(usernameLogado).toLowerCase();
+          });
+          if (atualizado) db.auth.currentId = atualizado.id;
+        }
+      }
       if (b.config) db.config = Object.assign({}, db.config, b.config);
       if (typeof b.proximoSeq === 'number' && b.proximoSeq > (db.counters.sale || 0)) {
         db.counters.sale = b.proximoSeq;
       }
       save();
       return { ok: true, produtos: db.products.length, clientes: db.customers.length };
+    }).catch(function () { return { ok: false, motivo: 'erro' }; });
+  }
+
+  /* Campos em que o SERVIDOR manda. Fora desta lista, o valor e local. */
+  var CAMPOS_DO_SERVIDOR = ['stock', 'price', 'cost', 'min', 'name', 'category',
+    'active', 'divergencia', 'barcode', 'code', 'unit', 'emoji', 'stockArea', 'stockAisle', 'stockShelf', 'stockHeight', 'stockDeposit', 'stockSales', 'depositAisle', 'depositShelf', 'depositHeight', 'salesAisle', 'salesShelf', 'salesHeight'];
+
+  /* Reconcilia o catalogo local com o servidor.
+   *
+   * O servidor decide preco e estoque; o local e uma copia de trabalho. Sem
+   * reconciliacao periodica, dois caixas que mexem no mesmo produto fora do
+   * fluxo normal (um vende, o outro ajusta o cadastro) ficam divergentes ate
+   * alguem abrir a tela errada e reparar -- e a venda a risco de sair com o
+   * estoque velho.
+   *
+   * Duas regras de seguranca:
+   *   1. Cadastro local que AINDA NAO subiu (fila de reenvio ou lote com
+   *      atraso) bloqueia o ciclo. Aplicar o servidor por cima apagaria a
+   *      edicao antes de ela chegar la.
+   *   2. Produto que existe no servidor e nao existe aqui ENTRA no local,
+   *      senao este caixa nunca vende o item cadastrado no vizinho.
+   */
+  function reconciliarEstoque() {
+    if (!temServidor() || !API.produtos) return Promise.resolve({ ok: false, motivo: 'sem servidor' });
+    var loteLocal = filaCadastro.products && Object.keys(filaCadastro.products).length > 0;
+    if (loteLocal || (API.temPendencia && API.temPendencia('products'))) {
+      return Promise.resolve({ ok: false, motivo: 'cadastro local pendente' });
+    }
+    return API.produtos().then(function (lista) {
+      if (!Array.isArray(lista)) return { ok: false, motivo: 'sem resposta' };
+      var porId = {};
+      lista.forEach(function (s) { porId[s.id] = normalizarLocalizacao(s); });
+
+      var atualizados = 0;
+      var mudancas = [];
+      db.products.forEach(function (p) {
+        var s = porId[p.id];
+        if (!s) return;
+        var mudou = false;
+        for (var i = 0; i < CAMPOS_DO_SERVIDOR.length; i++) {
+          var c = CAMPOS_DO_SERVIDOR[i];
+          if (s[c] === undefined) continue;
+          if (p[c] !== s[c]) { p[c] = s[c]; mudou = true; }
+        }
+        if (mudou) { atualizados++; mudancas.push({ id: p.id, name: p.name, stock: p.stock }); }
+      });
+
+      var novos = 0;
+      lista.forEach(function (s) {
+        if (db.products.some(function (p) { return p.id === s.id; })) return;
+        db.products.push(normalizarLocalizacao(s));
+        novos++;
+      });
+
+      if (atualizados || novos) save();
+      return { ok: true, atualizados: atualizados, novos: novos, mudancas: mudancas };
     }).catch(function () { return { ok: false, motivo: 'erro' }; });
   }
 
@@ -687,6 +860,7 @@
     logout: logout,
     temServidor: temServidor,
     puxarDoServidor: puxarDoServidor,
+    reconciliarEstoque: reconciliarEstoque,
     enviarVenda: enviarVenda,
     sincronizar: sincronizar,
     marcarCadastro: marcarCadastro,
@@ -697,6 +871,9 @@
     closeShift: closeShift,
     nextId: nextId,
     marginOf: marginOf,
+    promoVigente: promoVigente,
+    precoVigente: precoVigente,
+    hojeISO: hojeISO,
     productByBarcode: productByBarcode,
     categoryOf: categoryOf,
     exportJSON: exportJSON,

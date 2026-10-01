@@ -13,7 +13,7 @@ rodando num só arquivo. Sem nuvem, sem assinatura, sem internet.
 
 ```
 MINI PC (loja)                CAIXAS (rede local)
-┌──────────────┐      http://IP:8787     ┌────────┐
+┌──────────────┐       HTTPS via proxy    ┌────────┐
 │ node servidor │◄───────────────────────│ Chrome │
 │ + SQLite      │                        └────────┘
 │ porta 8787    │   ┌────────┐ ┌────────┐
@@ -41,17 +41,64 @@ MINI PC (loja)                CAIXAS (rede local)
 | **Relatórios** | top produtos, entradas/saídas |
 | **Backup** | export/import JSON + CSV de vendas; servidor faz snapshot automático |
 | **Auth** | scrypt (N=16384, sal por usuário) + sessão por token, roles admin/operador |
+| **Preços e promoções** | ajuste de preço em massa e preço promocional por produto, com data de início e fim |
+
+## Preços e promoções
+
+A ferramenta fica em **Ajustes → Preços e promoções** e cobre duas coisas
+independentes: o ajuste em massa e o preço promocional por produto.
+
+### Ajuste de preço em massa
+
+O cartão **Preços e promoções** em Ajustes abre um modal que altera o preço de
+venda de vários produtos de uma vez:
+
+- **Operação:** *aumentar* ou *reduzir* (reduzir é o caminho da promoção).
+- **Quanto:** o valor da mudança, em **percentual (%)** ou em **reais (R$)**.
+- **Aplicar em:** *todos os produtos do filtro* ou *apenas os selecionados*, com
+  marcação individual na lista.
+- **Filtrar por categoria:** limita o alcance a uma categoria.
+
+A prévia mostra quantos produtos serão atualizados e um exemplo
+(`Arroz: R$ 25,90 → R$ 23,31`) antes de confirmar. Cada produto alterado é
+enviado ao servidor (`marcarCadastro`), então os outros caixas passam a vender
+pelo preço novo na próxima sincronização. O preço nunca cai abaixo de R$ 0,01.
+
+### Preço promocional por produto (com data de início e fim)
+
+No cadastro do produto, aba **Preço e margem**, há três campos:
+
+| Campo | Função |
+|---|---|
+| **Preço promocional (R$)** | preço de venda durante a promoção; `0` ou vazio desativa |
+| **Promoção a partir de** | data de início (opcional) |
+| **Promoção até** | data de fim (opcional) |
+
+Regras:
+
+- Sem datas, a promoção vale até ser removida. Com datas, vale só dentro da
+  janela (a data final é inclusive).
+- Enquanto a promoção está vigente, o **PDV aplica o preço promocional
+  automaticamente** — tanto no card do produto quanto no carrinho.
+- Na frente de caixa e na lista de produtos o promocional aparece destacado e o
+  preço cheio fica riscado ao lado.
+- A data final precisa ser depois da inicial; a validação bloqueia o contrário.
+- O ajuste em massa e a promoção por produto são independentes: o ajuste mexe no
+  preço cheio (`price`), a promoção vive nos campos próprios e não é sobrescrita
+  por um ajuste em massa.
 
 ## Segurança da rede local
 
-Tudo trafega em HTTP puro na LAN, então o servidor trata o que é gratuito:
+O servidor exige HTTPS quando escuta em uma interface de rede. Sem TLS, inicia
+somente em `localhost`; a exceção `SUDAM_PERMITIR_HTTP_LAN=1` é explícita e deve
+ficar restrita a uma LAN isolada.
 
 - **Toda rota `/api` exige sessão.** O `/api/login` emite um token (12 h) que
   vai em `Authorization: Bearer`; sem ele a resposta é 401. Sobe e desce
   junto com o servidor, então reiniciar o mini PC não desconecta os caixas.
-  Única exceção: `/api/migrar` responde sem token **apenas** enquanto o banco
-  não tiver nenhum usuário (o primeiro acesso, quando ainda não há conta
-  para entrar). Depois do primeiro usuário ela tranca.
+  Única exceção: `/api/migrar` funciona sem token somente a partir do próprio
+  servidor, enquanto o banco está vazio, e exige um administrador ativo. A
+  inicialização é revalidada dentro de uma transação para impedir corrida.
 - **O banco não é servido por HTTP.** O servidor nega `.db`, `-wal`, `-shm`
   e as pastas `servidor/`, `_backup/`, `dist/`, `icone/`, `.git/`.
   Antes disso, `GET /servidor/dados/sudam.db` baixava o banco inteiro —
@@ -60,6 +107,9 @@ Tudo trafega em HTTP puro na LAN, então o servidor trata o que é gratuito:
   `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`.
 - **Senha no servidor é scrypt**, não o FNV do app antigo. O hash legado
   ainda converte no primeiro login, sem obrigar o gerente a recriar senha.
+- **Troca de senha no servidor** exige a senha atual, aceita nova senha de
+  12–256 caracteres e encerra as outras sessões da conta. Troque `admin` / `1234`
+  em **Ajustes → Usuários e acessos → Trocar minha senha** antes de abrir a loja.
 - **O dinheiro é conferido no servidor.** Preço, quantidade, soma dos
   pagamentos e troco são recalculados no servidor; o cliente não decide o
   valor final. Quantidade negativa e preço/estoque negativo são recusados.
@@ -85,7 +135,7 @@ Cria atalho no menu Iniciar, abre no navegador padrão. Não requer Python.
 
 ```bash
 sudo ./instalar-linux.sh --com-nginx     # instala + HTTPS na porta 443
-sudo ./instalar-linux.sh                  # instala só o serviço (HTTP na 8787)
+sudo ./instalar-linux.sh --permitir-http-lan # só em LAN isolada
 sudo ./instalar-linux.sh --desinstalar    # remove, preservando os dados
 ```
 
@@ -147,13 +197,15 @@ node --version   # deve ser v22.5+
 
 # 2. Suba o servidor
 cd servidor
+set SUDAM_HOST=127.0.0.1
 node servidor.mjs
 
 # 3. Acesse no navegador
 http://localhost:8787
 ```
 
-Nos caixas da rede: `http://IP-DO-MINI-PC:8787`
+Para acesso pela rede, configure TLS conforme as instruções Linux ou Windows.
+Sem TLS, o servidor aceita apenas `http://localhost:8787`.
 
 ### Configurar porta
 ```bash
@@ -170,6 +222,46 @@ cópias vão para `<pasta-do-banco>\backup`. Para separá-las de vez, use
 `SUDAM_BACKUP=C:\backup-pdv`. (Backup no mesmo disco do banco não protege
 contra o disco morrer — só contra arquivo corrompido.)
 
+Para espelhar cada backup verificado em outro disco (recomendado), defina
+`SUDAM_BACKUP_ESPELHO=E:\Sudam\backup` antes de iniciar o servidor. O PDV
+mantem 24 copias recentes e mais uma copia diaria por 30 dias. Ajustes mostra
+a ultima copia verificada e eventuais falhas no espelho.
+
+### Onde os dados ficam no Windows
+
+Fora da pasta do programa: `%ProgramData%\Sudam Gestao PDV\dados\sudam.db`.
+Reinstalar ou apagar a pasta do aplicativo **não** apaga mais o histórico. Numa
+instalação antiga (com o banco em `servidor\dados`), o servidor copia esse banco
+para o novo local no primeiro boot e passa a usar a cópia — o arquivo antigo
+fica no lugar, por segurança.
+
+### Liberar o acesso dos caixas (firewall)
+
+O Windows bloqueia conexões de entrada por padrão. Depois de configurar HTTPS,
+rode `LIBERAR-FIREWALL.bat` **como administrador**: ele libera a porta 8787
+apenas para a rede local (`remoteip=localsubnet`, perfil privado). Sem TLS, o
+servidor aceita conexões somente deste computador.
+
+### HTTPS no Windows (necessário para acesso pela rede)
+
+Sem HTTPS, o servidor limita o listener a `localhost`; os outros caixas não
+conseguem se conectar. Para liberar acesso pela rede, configure TLS:
+
+1. `powershell -ExecutionPolicy Bypass -File GERAR-CERTIFICADO.ps1` — gera um
+   certificado autoassinado (sem precisar de administrador), cria uma senha
+   aleatória para o `.pfx` e mostra ambos.
+2. Suba o servidor com:
+
+```bash
+set SUDAM_TLS=1
+set SUDAM_PFX=C:\caminho\certificado.pfx
+set SUDAM_PFX_SENHA=COLE_A_SENHA_IMPRESSA
+INICIAR PDV.bat
+```
+
+O navegador avisa do certificado autoassinado na primeira visita — é esperado,
+como no nginx do Linux. Acesse por `https://localhost:8787`.
+
 ## Migrar os dados que já existem
 
 O app historicamente guardava tudo no `localStorage` do navegador. Com o
@@ -179,8 +271,9 @@ servidor no ar:
 2. **Ajustes → Dados → Migrar dados para o servidor**.
 3. Confirme. A contagem do que subiu aparece em seguida.
 
-A migração so responde sem token enquanto o banco estiver sem nenhum usuário.
-Depois do primeiro cadastro ela exige sessão, como as demais rotas.
+A migração inicial precisa ser feita no próprio servidor. A rota só funciona
+sem sessão enquanto o banco está vazio e recebe um administrador ativo; depois
+disso ela exige sessão, como as demais rotas.
 
 ## Testes
 
@@ -193,9 +286,10 @@ login com senha scrypt, bloqueio de sessão ausente, gravação de produto e
 cliente, venda em transação, preço vindo do servidor, divergência de estoque,
 idempotência, coleções genéricas, logout e a recusa de servir o `.db`.
 
-São **112 asserções**, incluindo as regressões de segurança: pagamento parcial,
+São **123 asserções**, incluindo as regressões de segurança: pagamento parcial,
 troco forjado, crédito inflado, quantidade negativa, autoria de venda forjada,
-estorno de venda alheia por caixa, corpo grande demais e token na URL.
+estorno de venda alheia por caixa, escrita por coleção bloqueada por perfil,
+dinheiro em centavos inteiros, corpo grande demais e token na URL.
 
 No Linux (o `\` vira `/`):
 
@@ -209,10 +303,11 @@ node servidor/teste/e2e.mjs /tmp/pdvt "$PWD/servidor"
 node servidor/teste/backup-restaura.mjs /tmp/pdv-r "$PWD/servidor"
 ```
 
-21 asserções que fazem o caminho inteiro: popula um banco, grava o backup,
-copia o par `.db`/`-wal` para uma pasta nova, sobe um servidor apontado só para
-essa cópia e confere que voltaram o login do admin, os produtos, o preço, o
-estoque já descontado, o cliente, a venda e o config.
+20 asserções que fazem o caminho inteiro: popula um banco, grava o backup
+(`VACUUM INTO`, **um arquivo só**, sem par `.db`/`-wal` para desencontrar),
+copia esse arquivo para uma pasta nova, sobe um servidor apontado só para essa
+cópia e confere que voltaram o login do admin, os produtos, o preço, o estoque
+já descontado, o cliente, a venda e o config.
 
 ### Fila offline e XSS no frontend (testado)
 
@@ -226,10 +321,12 @@ node servidor/teste/frontend-seguro.mjs "$PWD"
 duplo enfileiramento, pílula venenosa, 401 e recusa definitiva.
 
 `frontend-seguro.mjs` (15 asserções) é um guarda de segurança em duas frentes.
-Primeiro, o app monta quase tudo com `innerHTML`, então qualquer campo do banco
-concatenado sem `esc()` vira HTML injetado: o teste varre `js/*.js` e falha se um
-campo de dado (`emoji`, `color`, `address`, `obs`, …) entrar numa linha que monta
-markup sem escape. Segundo, ele falha se algum `.html` tiver `<script>` inline —
+Primeiro, as telas montam DOM com `createElement`, mas o corpo dos modais de
+formulário ainda é markup constante em string — então qualquer campo do banco
+concatenado sem `esc()` viraria HTML injetado: o teste varre `js/*.js` e falha
+se um campo de dado (`emoji`, `color`, `address`, `obs`, …) entrar numa linha
+que monta markup sem escape. Segundo, ele falha se algum `.html` tiver
+`<script>` inline —
 o servidor manda `script-src 'self'`, sem `'unsafe-inline'`, então o navegador
 bloqueia e não avisa. O `index.html` já teve dois blocos assim (o coletor de erro
 e o watchdog que mostra "O sistema não conseguiu iniciar"); nenhum dos dois rodava.
@@ -244,6 +341,37 @@ injetado **não executa JavaScript** — o estrago real era HTML/CSS injetado
 passa a ser XSS completo se o CSP for afrouxado ou se o app for aberto por
 `file://`, sem cabeçalho nenhum.
 
+### Navegador de verdade: XSS e CSP nas telas reais (testado)
+
+```bash
+node servidor/teste/navegador-seguro.mjs "%TEMP%" "%CD%\servidor"
+```
+
+38 asserções que abrem o app no Chrome headless (via DevTools Protocol, sem
+dependência nova), fazem **login pela própria tela**, gravam um produto (com
+preço promocional) e um cliente com payload de XSS e conferem: nenhum elemento
+injetado aparece em Início, PDV, Vendas, Produtos, Compras, Clientes,
+Financeiro, Contas, Relatórios e Ajustes; nenhuma dessas telas cai na tela de
+erro; o payload aparece como texto (foi escapado, não removido); a ferramenta
+de preços abre e calcula a prévia; o preço promocional vigente troca o preço no
+carrinho e expira fora da janela; e o CSP bloqueia `<script>` inline e handler
+inline (`onerror`). O próprio teste injeta o payload cru antes, como controle,
+para provar que o detector enxerga o ataque quando ele existe.
+
+Requer o Google Chrome instalado (caminho padrão; use `CHROME` para apontar
+outro).
+
+### Dinheiro: migração para centavos inteiros (testado)
+
+```bash
+node servidor/teste/centavos-migracao.mjs "%TEMP%" "%CD%\servidor"
+```
+
+10 asserções que abrem um banco no formato antigo (colunas `REAL`, sem a flag
+`centavos`), deixam o `banco.mjs` migrar e conferem que as colunas de dinheiro
+viraram centavos inteiros (4.5 → 450), que o JSON continua em reais e que
+reabrir não converte duas vezes.
+
 ### Sincronização de cadastro (testado)
 
 ```bash
@@ -254,17 +382,41 @@ node servidor/teste/sync-cadastro.mjs /tmp/pdv-s "$PWD/servidor"
 enxerga, com preço e estoque decididos no servidor, reenvio sem duplicar
 (upsert por id) e estorno devolvendo estoque e baixando a dívida do cliente.
 
+### Pix e dados fiscais (testado)
+
+```bash
+node servidor/teste/pix-fiscal.mjs "%TEMP%" "%CD%\servidor"
+```
+
+46 asserções em duas frentes. No cliente, o payload **BR Code** é conferido
+campo a campo contra a spec (TLV, GUI `BR.GOV.BCB.PIX`, moeda 986, valor, nome,
+cidade, txid) e o CRC16 contra o vetor padrão do algoritmo do Pix
+(`CRC-16/CCITT-FALSE`, `"123456789" → 29B1`); a normalização da chave cobre
+CPF, CNPJ (sem DDI indevido), telefone com e sem `+55` e e-mail; e o gerador de
+QR (`js/qr.js`) é checado por sanidade — SVG válido, módulos coerentes e saída
+determinística. No servidor, sobe o `servidor.mjs` de verdade e confirma que os
+campos fiscais do produto (NCM, CFOP, CSOSN, CEST, origem, CST/CST PIS/COFINS)
+e a config fiscal (CRT, CNAE, código IBGE, inscrição municipal, CEP, UF, e-mail
+e telefone fiscal, chave/cidade Pix) sobrevivem ao vai-e-volta do
+`/api/migrar` para o `/api/base`.
+
+O teste **não** emite NFC-e — o sistema declara que não emite (ver
+`CHECKLIST-PDV.md` §2.1). O que ele garante é o armazenamento correto do dado
+fiscal e a geração do QR Pix de cobrança.
+
 Para restaurar de verdade, a mão:
 
 ```bash
 sudo systemctl stop sudam-pdv
 sudo cp /var/backups/sudam-pdv/sudam.<carimbo> /var/lib/sudam-pdv/sudam.db
+# limpe o WAL antigo, senão o SQLite pode reaplicar frames de antes do restauro
+sudo rm -f /var/lib/sudam-pdv/sudam.db-wal /var/lib/sudam-pdv/sudam.db-shm
 sudo systemctl start sudam-pdv
 ```
 
-O `.db` é copiado antes do `-wal`, nessa ordem — é a ordem segura, porque o WAL
-copiado nunca fica mais velho que o `.db`. Todo backup passa por
-`wal_checkpoint(TRUNCATE)` antes de copiar.
+Cada backup é **um arquivo só**: o `VACUUM INTO` do SQLite escreve a cópia
+inteira já com o WAL aplicado, então não existe a janela em que `.db` e `-wal`
+não batem (uma venda entrando no meio da cópia). É só copiar o arquivo de volta.
 
 ---
 
@@ -302,6 +454,11 @@ Node.js 22+ (zero dependências externas — `node:http`, `node:fs`, `node:sqlit
 
 ## Observações
 
+- **Dinheiro em centavos inteiros:** o servidor guarda e calcula valores em
+  centavos (`servidor/dinheiro.mjs`), para a soma de muitas linhas não derivar
+  em ponto flutuante. O JSON que o cliente lê continua em reais — é o contrato
+  das telas. As colunas de dinheiro no SQLite são `INTEGER` em centavos e a
+  conversão de bancos antigos acontece uma vez, no primeiro boot.
 - **Fiscal:** hoje emite "comprovante não fiscal". NFC-e exige decisão A/B
   (sem fiscal / integrado com provedor) — ver CHECKLIST-PDV.md §2.1
 - **localStorage legado:** dados antigos migram via `Ajustes → Migrar para o servidor`

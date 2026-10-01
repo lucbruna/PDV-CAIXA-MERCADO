@@ -1,60 +1,54 @@
-ANÚNCIO PRONTO — SUDAM GESTÃO PDV
+﻿ANÚNCIO PRONTO — SUDAM GESTÃO PDV
 =================================
 
-TÍTULO
-PDV para Mercadinho e Mercearia | Caixa, Estoque e Gestão
+TÍTULO SUGERIDO
+Sistema PDV para Mercadinho | Caixa, Estoque e Vendas
 
 PREÇO
-R$ 30,00 — pagamento único, sem mensalidade.
+Informe o preço vigente diretamente no anúncio. O valor pode ser alterado pelo vendedor e pela plataforma.
 
-TIPO DO PRODUTO
-Produto digital. Não há envio de equipamento ou mercadoria física.
+DESCRIÇÃO PARA COPIAR NO MERCADO LIVRE
 
-DESCRIÇÃO
+Organize as vendas e a rotina do seu mercadinho em um só sistema.
 
-Tenha caixa, produtos e gestão do seu mercadinho organizados em um só sistema.
+O Sudam Gestão PDV é um sistema digital de frente de caixa e gestão para mercadinhos, mercearias e pequenos comércios. Reúne ferramentas para registrar vendas, acompanhar o caixa, cadastrar produtos e controlar estoque e rotinas financeiras.
 
-O Sudam Gestão PDV é um programa de frente de caixa e gestão para mercadinhos,
-mercearias e pequenos comércios. Depois de instalado, você usa o sistema no
-computador, com os dados guardados localmente no navegador do próprio aparelho.
+RECURSOS
 
-COMPRA ÚNICA: pague R$ 30,00 uma vez e receba os arquivos do programa. O PDV
-fica com você integralmente para seu uso. Não é aluguel: sem mensalidade, sem
-assinatura e sem cobrança recorrente.
+• Frente de caixa com pesquisa de produtos por nome ou código de barras.
+• Cadastro de produtos com código de barras digitado ou lido por leitor USB compatível, além de categoria, custo, preço de venda e estoque mínimo.
+• Carrinho de compras, aplicação de desconto, cálculo de troco e registro da venda.
+• Formas de pagamento: dinheiro, Pix, débito, crédito e crediário, conforme configuração da loja.
+• No Pix, o sistema registra a forma de pagamento; a confirmação do recebimento deve ser conferida pelo lojista no aplicativo ou extrato bancário.
+• Abertura e fechamento de caixa, conferência do turno e registro de entradas e retiradas.
+• Controle de estoque com produtos no depósito e na área de venda, localização por rua/corredor, prateleira e altura, e registro de transferências entre locais.
+• Acompanhamento de estoque mínimo e validade de produtos.
+• Registro de compras e recebimento de mercadorias, fornecedores e movimentações de estoque.
+• Cadastro de clientes, contas a pagar e a receber, fluxo de caixa e relatórios de vendas e operação.
+• Perfis de administrador e operador de caixa.
+• Recursos de backup e restauração dos dados do sistema.
+• Campos para preencher dados cadastrais e fiscais da loja e dos produtos, para organização e futura configuração com o contador.
 
-RECURSOS DO SISTEMA
-• Frente de caixa com busca por nome ou código de barras.
-• Carrinho de venda, desconto, cálculo de troco e finalização.
-• Pagamentos em dinheiro, Pix, débito, crédito e crediário.
-• Abertura e fechamento de caixa com conferência do turno.
-• Cadastro de produtos, categorias, preço de custo e venda.
-• Acompanhamento de estoque, estoque mínimo e validade.
-• Cadastro de clientes e fornecedores.
-• Registro de compras e movimentações do negócio.
-• Contas a pagar e a receber, fluxo de caixa e relatórios.
-• Histórico de vendas, exportação de dados e backup.
-• Acesso local por perfis de administrador e operador de caixa.
+OPERAÇÃO EM REDE
 
-O QUE VOCÊ RECEBE
-• Instalador digital do Sudam Gestão PDV para Windows.
-• Arquivos locais do sistema incluídos na instalação.
-• Instruções para instalar e começar a usar.
+O sistema pode ser configurado para acesso por outros computadores da mesma rede local, usando um computador como servidor. A configuração depende da rede, do computador servidor e dos dispositivos utilizados. Não é um serviço em nuvem e não inclui hospedagem ou configuração presencial.
 
-COMO É A ENTREGA
-Após a confirmação do pagamento, você receberá as instruções e o produto digital
-pelas mensagens da compra no Mercado Livre. Não é enviado computador, leitor,
-impressora ou qualquer outro equipamento.
+RECURSOS FISCAIS
+
+O sistema disponibiliza campos para cadastrar informações fiscais da empresa e dos produtos. O preenchimento desses campos, por si só, não emite NF-e ou NFC-e nem transmite documentos à SEFAZ. Consulte seu contador sobre a configuração fiscal necessária para sua empresa.
+
+PRODUTO DIGITAL
+
+Você recebe os arquivos digitais e as instruções de instalação conforme a modalidade de entrega disponível no anúncio. Não há envio de computador, leitor de código de barras, impressora ou outros equipamentos. Equipamentos e periféricos são vendidos separadamente.
 
 ANTES DE COMPRAR
-• O produto é digital e foi preparado para instalação em computador Windows.
-• É necessário ter um navegador atualizado, como Microsoft Edge ou Google Chrome.
-• Os cadastros ficam no navegador e no computador usados para operar o sistema.
-  Faça backups periódicos pelo próprio PDV.
-• O sistema vem com catálogo de demonstração, que pode ser editado pelo comprador.
-• As imagens mostram telas reais do programa; alguns dados exibidos são de exemplo.
 
-Compre agora por  e organize a rotina do seu comércio com um sistema
-prático, instalado no seu computador e sem cobrança mensal.
+• Confira no anúncio a versão, os requisitos e a forma de entrega disponíveis.
+• Produto preparado para uso em computador com Windows e navegador atualizado compatível.
+• O funcionamento em vários computadores exige configuração da rede local e do computador servidor.
+• Faça backups regulares e mantenha uma cópia em outro local seguro.
+• O sistema pode incluir produtos e dados de demonstração, que devem ser revisados e substituídos antes do uso real.
+• As imagens são ilustrativas de telas do sistema; os dados exibidos podem ser exemplos.
+• A compra não inclui equipamentos, implantação presencial, serviço de contabilidade ou integração fiscal com a SEFAZ.
 
-FOTOS
-Use as imagens da pasta fotos na ordem numérica. São capturas da versão atual.
+Após a confirmação da compra, consulte as instruções de entrega disponibilizadas no próprio Mercado Livre.

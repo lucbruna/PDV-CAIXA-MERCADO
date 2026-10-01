@@ -8,10 +8,7 @@
  * venda faz e ser gravada e marcada para o gerente reconciliar.
  */
 import { gravar, obter } from './banco.mjs';
-
-function arred2(n) {
-  return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
-}
+import { centavos, reais, arred2, somaCentavos } from './dinheiro.mjs';
 
 /* Erro de entrada do cliente (400) — nao e falha do servidor, entao o cliente
  * precisa saber que a venda foi recusada, e nao que deu problema. */
@@ -22,7 +19,7 @@ function entrada(mensagem, codigo) {
 /* Folga de 1 centavo. Centavo unico e sempre sujeito a ponto flutuante
  * (10.10 / 3 = 3.3666...), e reprovar uma venda por causa de 0,005 e pior
  * que o erro que ela evita: o cliente esta no balcao com a mercadoria. */
-const FOLGA = 0.01;
+const FOLGA_CENT = 1;
 
 /* Id sequencial de lancamento. Fica em uma funcao propria porque e usado em
  * dois ramos do laco e a versao anterior repetia a mesma subquery giantemente
@@ -48,7 +45,7 @@ export function registrarVenda(db, venda, opcoes = {}) {
      * assim um corpo adulterado (ou um bug de rede) nao baixa o estoque por
      * 999 unidades cobrando R$ 0,01 cada. */
     const itensCorrigidos = [];
-    let subtotalServidor = 0;
+    let subtotalCent = 0;
     for (const item of itens) {
       const p = obter(db, 'produtos', item.id);
       if (!p) {
@@ -69,14 +66,28 @@ export function registrarVenda(db, venda, opcoes = {}) {
       if (!Number.isFinite(preco) || preco < 0) {
         throw entrada(`Preco invalido no cadastro de "${p.name || item.id}".`, 'preco_invalido');
       }
-      const linha = { ...item, price: arred2(preco), qty, subtotal: arred2(preco * qty) };
+      /* A conta do item e em centavos: preco em ponto flutuante multiplicado
+         por quantidade fracionaria (kg) so acumula erro. */
+      const precoCent = centavos(preco);
+      const subtotalItemCent = Math.round(precoCent * qty);
+      const linha = { ...item, price: reais(precoCent), qty, subtotal: reais(subtotalItemCent) };
       itensCorrigidos.push(linha);
-      subtotalServidor = arred2(subtotalServidor + linha.subtotal);
+      subtotalCent += subtotalItemCent;
 
-      const novo = arred2((Number(p.stock) || 0) - qty);
+      const estoqueAtual = Number(p.stock) || 0;
+      if (p.stockDeposit == null && p.stockSales == null) {
+        p.stockDeposit = p.stockArea === 'venda' ? 0 : estoqueAtual;
+        p.stockSales = p.stockArea === 'venda' ? estoqueAtual : 0;
+      }
+      const novo = arred2(estoqueAtual - qty);
+      let aBaixar = qty;
+      const noSalao = Math.max(0, Number(p.stockSales) || 0);
+      const baixaSalao = Math.min(noSalao, aBaixar);
+      if (p.stockSales != null) p.stockSales = arred2(noSalao - baixaSalao);
+      aBaixar = arred2(aBaixar - baixaSalao);
+      if (p.stockDeposit != null) p.stockDeposit = arred2((Number(p.stockDeposit) || 0) - aBaixar);
       p.stock = novo;
       if (novo < -1e-9) {
-        /* Cliente ja levou a mercadoria: a venda segue, mas fica sinalizada. */
         divergentes.push({ id: p.id, name: p.name, stock: novo, vendido: qty });
         p.divergencia = true;
       } else {
@@ -96,13 +107,10 @@ export function registrarVenda(db, venda, opcoes = {}) {
      * o cliente declarou, nunca acima do subtotal nem acima do teto do perfil.
      * Sem o teto, um `discount` de 99999 zera a venda e o caixa entrega
      * mercadoria de graça — o preco unitario estar correto nao impede isso. */
-    const tetoDesconto = opcoes.tetoDesconto == null ? Infinity : Math.max(0, Number(opcoes.tetoDesconto) || 0);
-    const desconto = Math.min(
-      Math.max(Number(venda.discount) || 0, 0),
-      subtotalServidor,
-      tetoDesconto
-    );
-    const total = arred2(subtotalServidor - desconto);
+    const tetoNum = opcoes.tetoDesconto == null ? Infinity : Number(opcoes.tetoDesconto);
+    const tetoCent = Number.isFinite(tetoNum) ? Math.max(0, centavos(tetoNum)) : Infinity;
+    const descontoCent = Math.min(Math.max(centavos(venda.discount), 0), subtotalCent, tetoCent);
+    const totalCent = subtotalCent - descontoCent;
 
     /* ---- pagamento conferido contra o total do servidor ----
      *
@@ -120,35 +128,44 @@ export function registrarVenda(db, venda, opcoes = {}) {
      */
     const pagamentosBrutos = Array.isArray(venda.payments) ? venda.payments : [];
     const pagamentos = [];
-    let pagoTotal = 0;
-    let pagoDinheiro = 0;
+    let pagoTotalCent = 0;
+    let pagoDinheiroCent = 0;
+    let pagoNaoDinheiroCent = 0;
     for (const p of pagamentosBrutos) {
       if (!p || typeof p !== 'object') continue;
       const metodo = String(p.method || '').trim();
       if (!metodo) continue;
-      const valor = arred2(p.amount);
+      const valor = Number(p.amount);
       if (!Number.isFinite(valor) || valor < 0) {
         throw entrada(`Valor invalido na forma de pagamento "${metodo}".`, 'pagamento_invalido');
       }
+      const valorCent = centavos(valor);
       /* Só o dinheiro pode passar do total, porque é o único que gera troco.
        * Sem isso, `Crediário: 999999` numa venda de R$ 10 inflava a dívida
        * do cliente para R$ 999.999 — o limite de crédito virava ficção. */
-      if (metodo !== 'Dinheiro' && valor > total + FOLGA) {
+      if (metodo !== 'Dinheiro' && valorCent > totalCent + FOLGA_CENT) {
         throw entrada(
-          `"${metodo}" (R$ ${valor.toFixed(2)}) maior que o total da venda (R$ ${total.toFixed(2)}).`,
+          `"${metodo}" (R$ ${reais(valorCent).toFixed(2)}) maior que o total da venda (R$ ${reais(totalCent).toFixed(2)}).`,
           'pagamento_acima_do_total'
         );
       }
-      pagamentos.push({ ...p, method: metodo, amount: valor });
-      pagoTotal = arred2(pagoTotal + valor);
-      if (metodo === 'Dinheiro') pagoDinheiro = arred2(pagoDinheiro + valor);
+      pagamentos.push({ ...p, method: metodo, amount: reais(valorCent) });
+      pagoTotalCent += valorCent;
+      if (metodo === 'Dinheiro') pagoDinheiroCent += valorCent;
+      else pagoNaoDinheiroCent += valorCent;
     }
     if (!pagamentos.length) {
       throw entrada('Informe a forma de pagamento da venda.', 'pagamento_ausente');
     }
-    if (pagoTotal + FOLGA < total) {
+    /* Somente o dinheiro pode exceder o saldo restante. Conferir cada forma
+       isoladamente permitia, por exemplo, R$ 100 em dinheiro + R$ 100 em
+       crediario numa venda de R$ 100, dobrando a divida do cliente. */
+    if (pagoNaoDinheiroCent > totalCent) {
+      throw entrada('Pagamentos que nao sejam dinheiro nao podem exceder o total da venda.', 'pagamento_acima_do_total');
+    }
+    if (pagoTotalCent + FOLGA_CENT < totalCent) {
       throw entrada(
-        `Pagamento insuficiente: faltam R$ ${arred2(total - pagoTotal).toFixed(2)}.`,
+        `Pagamento insuficiente: faltam R$ ${reais(totalCent - pagoTotalCent).toFixed(2)}.`,
         'pagamento_insuficiente'
       );
     }
@@ -156,7 +173,7 @@ export function registrarVenda(db, venda, opcoes = {}) {
     /* Troco é do servidor. Aceitar o `change` do cliente permitia declarar
      * troco de R$ 450 sobre R$ 500 recebidos numa venda de R$ 10 e baixar o
      * dinheiro esperado do gaveteiro em R$ 440 sem nenhum dinheiro real. */
-    const troco = arred2(Math.max(0, pagoDinheiro - total));
+    const trocoCent = Math.max(0, pagoDinheiroCent - (totalCent - pagoNaoDinheiroCent));
 
     /* Data e do servidor. Aceitar `date` do cliente permitia lancar uma venda
      * de hoje com data de 400 dias atrás (ou de amanhã), mexendo em todo
@@ -167,10 +184,10 @@ export function registrarVenda(db, venda, opcoes = {}) {
     ...venda,
     items: itensCorrigidos,
     payments: pagamentos,
-    subtotal: subtotalServidor,
-    discount: desconto,
-    total,
-    change: troco,
+    subtotal: reais(subtotalCent),
+    discount: reais(descontoCent),
+    total: reais(totalCent),
+    change: reais(trocoCent),
     date: agoraServidor,
     /* QUEM vendeu vem da sessao, nunca do corpo da requisicao. O `...venda`
      * acima traz tudo que o cliente mandou, inclusive `operatorId` -- e esse
@@ -190,15 +207,15 @@ export function registrarVenda(db, venda, opcoes = {}) {
     /* ---- cliente: divida e pontos somam sobre o valor do servidor ---- */
     if (vendaCorrigida.customerId) {
       const c = obter(db, 'clientes', vendaCorrigida.customerId);
-      const credito = (vendaCorrigida.payments || [])
-        .filter((x) => x.method === 'Crediário')
-        .reduce((a, x) => a + (Number(x.amount) || 0), 0);
+      const creditoCent = somaCentavos(
+        (vendaCorrigida.payments || []).filter((x) => x.method === 'Crediário').map((x) => x.amount)
+      );
       if (c) {
-        if (credito > 0) {
-          c.debt = arred2((Number(c.debt) || 0) + credito);
+        if (creditoCent > 0) {
+          c.debt = reais(centavos(c.debt) + creditoCent);
           const cfg = opcoes.loyalty || {};
           if (cfg.enabled) {
-            c.points = (Number(c.points) || 0) + Math.floor((Number(vendaCorrigida.total) || 0) * (Number(cfg.pointsPerReal) || 1));
+            c.points = (Number(c.points) || 0) + Math.floor(reais(totalCent) * (Number(cfg.pointsPerReal) || 1));
           }
         }
         gravar(db, 'clientes', c);
@@ -238,19 +255,19 @@ export function registrarVenda(db, venda, opcoes = {}) {
           type: 'A receber',
           category: 'Venda a prazo',
           description: `Venda #${vendaCorrigida.id} · ${vendaCorrigida.customerName || ''}`,
-          amount: arred2(p.amount),
+          amount: reais(centavos(p.amount)),
           method: 'Crediário',
           settled: false,
         });
       } else {
-        const recebido = arred2(p.amount - (p.method === 'Dinheiro' ? troco : 0));
-        if (recebido > 0) {
+        const recebidoCent = centavos(p.amount) - (p.method === 'Dinheiro' ? trocoCent : 0);
+        if (recebidoCent > 0) {
           gravar(db, 'lancamentos', {
             ...base,
             type: 'Entrada',
             category: 'Venda PDV',
             description: `Venda #${vendaCorrigida.id}`,
-            amount: recebido,
+            amount: reais(recebidoCent),
             method: p.method,
             /* Nada foi baixado ainda: uma venda recem-registrada nao esta
              * "liquidada". Marcar a entrada de dinheiro como settled na criacao
@@ -269,10 +286,10 @@ export function registrarVenda(db, venda, opcoes = {}) {
     if (vendaCorrigida.shiftId) {
       const t = obter(db, 'turnos', vendaCorrigida.shiftId);
       if (t) {
-        const entrando = (vendaCorrigida.payments || [])
-          .filter((p) => p.method === 'Dinheiro')
-          .reduce((a, p) => a + (Number(p.amount) || 0), 0) - troco;
-        t.cashExpected = arred2((Number(t.cashExpected) || 0) + entrando);
+        const entrandoCent = somaCentavos(
+          (vendaCorrigida.payments || []).filter((p) => p.method === 'Dinheiro').map((p) => p.amount)
+        ) - trocoCent;
+        t.cashExpected = reais(centavos(t.cashExpected) + entrandoCent);
         t.sales = (t.sales || []).concat([vendaCorrigida.id]);
         gravar(db, 'turnos', t);
       }
@@ -326,13 +343,13 @@ export function estornarVenda(db, vendaId, motivo, opcoes = {}) {
     }
 
     /* ---- baixa a divida do cliente ---- */
-    const credito = (venda.payments || [])
-      .filter((p) => p.method === 'Crediário')
-      .reduce((a, p) => a + (Number(p.amount) || 0), 0);
-    if (venda.customerId && credito > 0) {
+    const creditoCent = somaCentavos(
+      (venda.payments || []).filter((p) => p.method === 'Crediário').map((p) => p.amount)
+    );
+    if (venda.customerId && creditoCent > 0) {
       const c = obter(db, 'clientes', venda.customerId);
       if (c) {
-        c.debt = arred2(Math.max(0, (Number(c.debt) || 0) - credito));
+        c.debt = reais(Math.max(0, centavos(c.debt) - creditoCent));
         gravar(db, 'clientes', c);
       }
     }
@@ -345,16 +362,16 @@ export function estornarVenda(db, vendaId, motivo, opcoes = {}) {
     }
 
     /* ---- tira do turno e do dinheiro esperado ---- */
-    let devolvido = 0;
+    let devolvidoCent = 0;
     for (const p of venda.payments || []) {
       if (p.method === 'Dinheiro') {
-        devolvido = arred2(devolvido + (Number(p.amount) || 0) - (Number(venda.change) || 0));
+        devolvidoCent += centavos(p.amount) - centavos(venda.change);
       }
     }
     if (venda.shiftId) {
       const t = obter(db, 'turnos', venda.shiftId);
       if (t) {
-        t.cashExpected = arred2((Number(t.cashExpected) || 0) - devolvido);
+        t.cashExpected = reais(centavos(t.cashExpected) - devolvidoCent);
         t.sales = (t.sales || []).filter((x) => x !== vendaId);
         gravar(db, 'turnos', t);
       }
@@ -375,7 +392,7 @@ export function estornarVenda(db, vendaId, motivo, opcoes = {}) {
     gravar(db, 'vendas', estornada);
 
     db.exec('COMMIT');
-    return { venda: estornada, repetida: false, devolvido };
+    return { venda: estornada, repetida: false, devolvido: reais(devolvidoCent) };
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch {}
     throw e;

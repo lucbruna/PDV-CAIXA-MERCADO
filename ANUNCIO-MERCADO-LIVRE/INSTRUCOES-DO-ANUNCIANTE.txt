@@ -6,6 +6,21 @@ INSTRUÇÕES PARA PUBLICAR E ENTREGAR
 2. Defina o preço do produto em R$ 30,00.
 3. Envie as imagens numeradas da pasta fotos. A primeira é a capa; as demais
    mostram telas reais do PDV.
+   Opcional: use as telas
+   emolduradas (1200x1200), no estilo usado em anúncios de software. Ha tres
+   estilos, mesmas telas:
+     - fotos-mockup/        -> dentro de um MacBook
+     - fotos-mockup-macos/  -> dentro de uma janela de navegador no macOS
+     - fotos-imac/           -> dentro do iMac da foto de referencia
+                               "Dashboard PDV no iMac em escritorio moderno.png"
+                               (1536x1024, a cena inteira)
+     - fotos-imac-quadrado/  -> a mesma cena em 1200x1200 (fundo estendido)
+   Neste ultimo estilo todas as imagens usam a MESMA moldura e o MESMO fundo:
+   so a area da tela do iMac troca peloPDV.
+   Abra mockups/previa-mockups.html para comparar os dois primeiros. Para regerar:
+     cd mockups && node render-mockups.mjs          (MacBook)
+     cd mockups && node render-mockups.mjs macos     (janela do macOS)
+     cd mockups && node gerar-mockup-imac.mjs        (iMac, nos dois formatos)
 4. Copie o título e a descrição de TEXTO-PRONTO-PARA-ANUNCIO.txt.
 5. Após a compra confirmada, entregue o instalador e as instruções pelo chat da
    própria compra, dentro do prazo informado ao comprador.

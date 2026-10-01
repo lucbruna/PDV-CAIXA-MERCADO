@@ -56,15 +56,19 @@
   color-scheme: dark;
 }
 
+/* Tema claro em branco gelo: as superfícies não usam #fff puro. O branco
+   absoluto estourava a tela e, sobre ele, as linhas de contorno (--line a
+   10%) praticamente sumiam. Agora as superfícies são um branco levemente
+   azulado e as bordas têm opacidade suficiente para desenhar as caixas. */
 [data-theme="light"] {
-  --bg:        #eef2f7;
-  --bg-2:      #e6ecf3;
-  --surface:   #ffffff;
-  --surface-2: #f6f8fb;
-  --surface-3: #eceff5;
-  --input:     #ffffff;
-  --line:      rgba(15,32,58,.10);
-  --line-2:    rgba(15,32,58,.18);
+  --bg:        #e3eaf3;
+  --bg-2:      #dae3ee;
+  --surface:   #f0f5fb;
+  --surface-2: #e8eff7;
+  --surface-3: #dee7f2;
+  --input:     #f6fafe;
+  --line:      rgba(15,32,58,.17);
+  --line-2:    rgba(15,32,58,.31);
 
   --text:      #10192b;
   --text-2:    #566076;
@@ -116,7 +120,7 @@ a { color: var(--accent); }
 .mono { font-family: var(--mono); }
 
 /* ---------- 3. APP SHELL (cadeia flex) ---------- */
-.app { display: flex; height: 100vh; overflow: hidden; }
+.app { display: flex; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
 .work { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
 /* ---------- 4. RAIL (sidebar compacta) ---------- */
@@ -595,7 +599,7 @@ tfoot td { padding: 10px 11px; background: var(--surface-2); font-weight: 800; b
 .auth-btn:hover { filter: brightness(1.08); }
 .auth-err { display: none; padding: 9px 12px; border-radius: var(--r-sm); background: var(--err-bg); color: var(--red); font-size: 12px; font-weight: 700; margin-bottom: 11px; border: 1px solid rgba(239,68,68,.25); }
 .auth-err.show { display: block; }
-.auth-qk { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.auth-qk { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 14px; }
 .auth-qk button { padding: 9px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px dashed var(--line-2); font-size: 11.5px; font-weight: 700; color: var(--text-2); }
 .auth-qk button:hover { border-color: var(--accent); color: var(--accent-3); }
 .auth-qk small { display: block; font-family: var(--mono); font-size: 10px; color: var(--text-3); margin-top: 2px; }

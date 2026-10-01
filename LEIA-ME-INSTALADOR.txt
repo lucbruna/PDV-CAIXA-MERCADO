@@ -11,6 +11,15 @@ O instalador faz uma instalacao por usuario, cria atalho no menu Iniciar,
 oferece atalho na area de trabalho e permite iniciar o PDV ao concluir.
 O atalho abre o PDV no navegador padrao do Windows. Nao requer Python.
 
+IMPRESSAO DIRETA (OPCIONAL)
+Para imprimir o cupom sem a caixa de impressao do navegador, execute
+IMPRIMIR-DIRETO.bat em cada computador que imprime. Informe o endereco do PDV
+servidor quando solicitado. Esse modo usa Microsoft Edge ou Google Chrome e a
+impressora padrao configurada no Windows; confirme antes que ela esta instalada
+e selecionada. Na primeira abertura, entre no sistema e aceite o aviso do
+certificado HTTPS, se aparecer. O perfil de navegador desse modo e separado do
+perfil normal, entao sera necessario entrar no PDV nele uma vez.
+
 Os cadastros e vendas ficam no armazenamento local do navegador. Para manter
 o mesmo armazenamento, abra o sistema sempre no mesmo navegador e conta do
 Windows. Use a funcao de backup do proprio PDV para exportar seus dados.

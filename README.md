@@ -347,7 +347,7 @@ passa a ser XSS completo se o CSP for afrouxado ou se o app for aberto por
 node servidor/teste/navegador-seguro.mjs "%TEMP%" "%CD%\servidor"
 ```
 
-38 asserções que abrem o app no Chrome headless (via DevTools Protocol, sem
+47 asserções que abrem o app no Chrome headless (via DevTools Protocol, sem
 dependência nova), fazem **login pela própria tela**, gravam um produto (com
 preço promocional) e um cliente com payload de XSS e conferem: nenhum elemento
 injetado aparece em Início, PDV, Vendas, Produtos, Compras, Clientes,
@@ -357,6 +357,11 @@ de preços abre e calcula a prévia; o preço promocional vigente troca o preço
 carrinho e expira fora da janela; e o CSP bloqueia `<script>` inline e handler
 inline (`onerror`). O próprio teste injeta o payload cru antes, como controle,
 para provar que o detector enxerga o ataque quando ele existe.
+
+Também exercita o **Pix por valor parcial**: com um item no carrinho e a parte
+Pix digitada, o QR passa a cobrar a **parte** (não o total); o rótulo
+"Confirmar recebimento" lança a parte já marcada como recebida; e um segundo QR
+do mesmo Pix é bloqueado para a venda não cobrar duas vezes a mesma forma.
 
 Requer o Google Chrome instalado (caminho padrão; use `CHROME` para apontar
 outro).

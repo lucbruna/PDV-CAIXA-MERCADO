@@ -262,8 +262,13 @@
     var parts = $('#payParts');
     if (parts) {
       UI.fill(parts, payParts.map(function (p, i) {
+        /* Parte de Pix confirmada pelo operador: o recebimento ja foi
+           conferido no app do banco, entao a venda pode fechar. */
+        var recebido = p.method === 'Pix' && p.pix && p.pix.em;
         return el('div', { class: 'v-part' }, [
-          el('span', null, p.method),
+          el('span', null, [p.method, recebido
+            ? el('em', { style: { color: '#16a34a', 'font-style': 'normal', 'font-size': '10.5px' } }, ' · recebido')
+            : null]),
           el('span', { style: { display: 'flex', 'align-items': 'center', gap: '6px' } }, [
             el('b', { class: 'v-mono' }, money(p.amount)),
             el('button', { class: 'v-del', 'data-rmpay': String(i) }, iconEl('X', 12))
@@ -472,18 +477,38 @@
       if (over) { UI.toast('"' + over.name + '" ficou acima do estoque disponível.', 'err'); return; }
     }
 
-    var summary = parts.map(function (p) { return p.method + ': ' + money(p.amount); }).join(' · ');
-    UI.confirm({
-      title: 'Confirmar venda de ' + money(totalV) + '?',
-      kind: 'ok', confirmText: 'Concluir venda',
-      html: '<strong>' + esc(summary) + '</strong>' +
-        (change > 0 ? '<br>Troco: <strong>' + money(change) + '</strong>' : '') +
-        (credit > 0 ? '<br>Crediário: <strong>' + money(credit) + '</strong> para ' + esc(customer.name) : '') +
-        (customer && !credit ? '<br>Cliente: <strong>' + esc(customer.name) + '</strong>' : '') +
-        '<br><span class="muted small">Confirme o recebimento de Pix e cartões no aplicativo da instituição.</span>'
-    }).then(function (ok) {
-      if (!ok) return;
-      commitSale(parts, totalV, change, credit, customer);
+    /* O Pix e dinheiro de terceiro: o operador TEM de confirmar o credito no
+       app do banco antes da venda fechar. A parte vinda do QR ja chega com
+       `pix` carimbado; uma parte digitada a mao e confirmada aqui. */
+    var pixPendentes = parts.filter(function (p) { return p.method === 'Pix' && !(p.pix && p.pix.em); });
+    var pedidoPix = pixPendentes.length
+      ? UI.confirm({
+          title: 'Pix recebido?', kind: 'ok', confirmText: 'Sim, recebi o Pix',
+          message: 'Confirme o crédito no aplicativo do banco antes de concluir.',
+          html: 'Pix de <strong>' + pixPendentes.map(function (p) { return money(p.amount); }).join(' + ') + '</strong>'
+        })
+      : Promise.resolve(true);
+
+    return pedidoPix.then(function (okPix) {
+      if (!okPix) return;
+      var u = Store.currentUser();
+      pixPendentes.forEach(function (p) {
+        p.pix = { em: new Date().toISOString(), por: u ? u.name : null, id: u ? u.id : null };
+      });
+
+      var summary = parts.map(function (p) { return p.method + ': ' + money(p.amount); }).join(' · ');
+      return UI.confirm({
+        title: 'Confirmar venda de ' + money(totalV) + '?',
+        kind: 'ok', confirmText: 'Concluir venda',
+        html: '<strong>' + esc(summary) + '</strong>' +
+          (change > 0 ? '<br>Troco: <strong>' + money(change) + '</strong>' : '') +
+          (credit > 0 ? '<br>Crediário: <strong>' + money(credit) + '</strong> para ' + esc(customer.name) : '') +
+          (customer && !credit ? '<br>Cliente: <strong>' + esc(customer.name) + '</strong>' : '') +
+          '<br><span class="muted small">Confirme o recebimento de cartões no aplicativo da instituição.</span>'
+      }).then(function (ok) {
+        if (!ok) return;
+        commitSale(parts, totalV, change, credit, customer);
+      });
     });
   }
 
@@ -530,7 +555,15 @@
       payments: parts.map(function (p) {
         var formaNormalizada = String(p.method).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
         var externo = formaNormalizada === 'Pix' || formaNormalizada === 'Debito' || formaNormalizada === 'Credito';
-        return { method: p.method, amount: p.amount, confirmedBy: externo && u ? u.name : null, confirmedById: externo && u ? u.id : null, confirmedAt: externo ? new Date().toISOString() : null };
+        /* Pix usa o carimbo da confirmacao explicita; cartao mantem o registro
+           automatico de quem operou o caixa. */
+        var confirmado = p.pix || (externo && u ? { em: new Date().toISOString(), por: u.name, id: u.id } : null);
+        return {
+          method: p.method, amount: p.amount,
+          confirmedBy: confirmado ? confirmado.por : null,
+          confirmedById: confirmado ? confirmado.id : null,
+          confirmedAt: confirmado ? confirmado.em : null
+        };
       }),
       status: 'Concluída'
     };
@@ -1162,7 +1195,10 @@
     });
     b('btnPix', function () {
       if (total() <= 0) { UI.toast('Adicione itens à venda.', 'warn'); return; }
-      payMethod = 'Pix'; payInput = ''; renderPayment();
+      /* Nao zera o valor digitado: se o operador digitou a parte do Pix, e ela
+         que o QR vai cobrar (valor parcial). Sem nada digitado, cai no quanto
+         ainda falta receber. */
+      payMethod = 'Pix';
       showPixDialog();
     });
     b('btnSup',   function () { cashMovement('Entrada'); });
@@ -1197,9 +1233,30 @@
     if (i) i.focus();
   }
 
+  function pixParte() {
+    return payParts.filter(function (p) { return p.method === 'Pix'; })[0] || null;
+  }
+
+  /* Valor do Pix: o que o operador digitou; se nada foi digitado, o quanto
+     ainda falta receber. E isto que faz o QR cobrar SO a parte do Pix num
+     pagamento dividido, em vez de sempre o total da venda. */
+  function pixValorSugerido() {
+    var digitado = UI.round2(UI.parseNum(payInput));
+    if (digitado > 0) return digitado;
+    var falta = remaining();
+    return falta > 0 ? falta : total();
+  }
+
   function showPixDialog() {
-    var amount = total();
-    var txid = String(Store.nextId('sale'));
+    if (pixParte()) {
+      UI.toast('Esta venda já tem um Pix. Remova a parte antes de gerar outro QR.', 'warn');
+      return;
+    }
+    var amount = UI.round2(pixValorSugerido());
+    if (!(amount > 0)) { UI.toast('Adicione itens à venda.', 'warn'); return; }
+    /* O txid usa o numero que a venda VAI receber, sem consumi-lo: abrir e
+       cancelar o QR nao pode queimar a numeracao (Store.nextId incrementa). */
+    var txid = 'PDV' + String(Store.db.counters ? Store.db.counters.sale : 1);
     var payload = UI.pixPayload(amount, txid);
     UI.modal({
       title: 'Pix — ' + money(amount), icon: 'pix', size: 'sm', footer: false,
@@ -1207,13 +1264,14 @@
         el('div', { class: 'pix-card' }, [
           el('div', { class: 'pix-qr', id: 'pixQrBox' }),
           el('div', { class: 'small muted', style: { 'margin-bottom': '8px' } },
-            'O cliente escaneia e paga. Confirme o crédito no app bancário antes de finalizar.'),
-          el('button', { class: 'btn primary block', id: 'btnCopyPix' }, [iconEl('copy', 15), ' Copiar Pix copia e cola'])
+            'QR com valor fixo de ' + money(amount) + '. Confirme o crédito no app do banco antes de lançar.'),
+          el('button', { class: 'btn primary block', id: 'btnConfirmPix' }, [iconEl('CheckCircle', 15), ' Confirmar recebimento']),
+          el('button', { class: 'btn ghost block', id: 'btnCopyPix', style: { 'margin-top': '6px' } }, [iconEl('copy', 15), ' Copiar Pix copia e cola'])
         ]),
         el('div', { class: 'modal-note' }, [
           iconEl('info', 12), ' Configure a chave Pix em ',
           el('b', null, 'Configurações → Fiscal'),
-          '. O QR é estático: serve para qualquer valor.'
+          '.'
         ])
       ),
       onMount: function (root, close) {
@@ -1240,6 +1298,27 @@
               .catch(function () { UI.toast('Não foi possível copiar. Selecione o texto manualmente.', 'warn'); });
           };
         } else if (cp) { cp.disabled = true; }
+
+        /* Confirmar o recebimento lanca a parte de Pix ja marcada como
+           recebida. Sem isto o operador teria de digitar o valor a mao e a
+           venda cobraria o Pix sem ninguem ter conferido o credito. */
+        var okBtn = root.querySelector('#btnConfirmPix');
+        if (okBtn) {
+          okBtn.disabled = !payload;
+          okBtn.onclick = function () {
+            if (!payload) return;
+            var u = Store.currentUser();
+            payParts.push({
+              method: 'Pix', amount: amount,
+              pix: { em: new Date().toISOString(), por: u ? u.name : null, id: u ? u.id : null }
+            });
+            payInput = '';
+            renderPayment();
+            close();
+            UI.toast('Pix de ' + money(amount) + ' lançado como recebido.', 'ok');
+            focusSearch();
+          };
+        }
       }
     });
   }

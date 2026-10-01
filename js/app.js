@@ -815,6 +815,24 @@
     var db = Store.db;
     var p = id ? db.products.find(function (x) { return x.id === id; }) : null;
     var v = p || { name: '', code: '', barcode: '', category: 'mercearia', cost: '', price: '', stock: 0, min: 3, unit: 'un', emoji: '📦', supplier: '', ncm: '', cfop: '5102', csosn: '102', expiry: '', lot: '', active: true, promoPrice: '', promoFrom: '', promoTo: '' };
+    /* CSOSN e CST ICMS sao exclusivos por regime: Simples/MEI usa CSOSN,
+       Regime Normal usa CST. Sem olhar o CRT o cadastro aceitava os dois
+       preenchidos e gravava dado fiscal invalido. Regime indefinido cai no
+       CSOSN (o caso mais comum em mercadinho). */
+    var regime = String(db.config.crt || '');
+    var normal = regime === '3';
+    var simples = !normal;
+    var notaRegime = regime === '3'
+      ? 'Regime Normal (CRT 3): o ICMS usa CST. O CSOSN do Simples não se aplica.'
+      : (regime === '1' || regime === '2' || regime === '4')
+        ? 'Simples Nacional/MEI (CRT ' + regime + '): o ICMS usa CSOSN. O CST ICMS não se aplica.'
+        : 'Regime (CRT) ainda não definido em Ajustes → Fiscal. Enquanto isso o ICMS usa CSOSN (Simples), o caso mais comum em mercadinho.';
+    var blocoIcms = normal
+      ? UI.field('CST ICMS (regime normal)', 'cst', v.cst || '', { placeholder: 'Ex.: 00, 20, 60' })
+      : UI.field('CSOSN (Simples Nacional)', 'csosn', v.csosn, { type: 'select', options: [
+          { value: '102', label: '102 — Tributada sem permissão de crédito' }, { value: '103', label: '103 — Isenta' },
+          { value: '300', label: '300 — Imune' }, { value: '400', label: '400 — Não tributada' },
+          { value: '500', label: '500 — ST cobrado anteriormente' }] });
     UI.modal({
       title: id ? 'Editar produto' : 'Novo produto', icon: 'box', size: 'lg',
       tabs: [
@@ -854,17 +872,13 @@
 
         '<div class="mpane" data-pane="fiscal"><div class="form-grid">' +
           UI.field('NCM', 'ncm', v.ncm, { placeholder: '2202.10.00' }) +
-          UI.field('CFOP', 'cfop', v.cfop, { type: 'select', options: [
+          UI.field('CFOP', 'cfop', v.cfop, { type: 'select', hint: 'Padrão 5102 (venda interna). Depende da operação e do destino.', options: [
             { value: '5102', label: '5102 — Venda interna' }, { value: '6102', label: '6102 — Venda interestadual' },
             { value: '5405', label: '5405 — ST' }, { value: '2202', label: '2202 — Devolução' }] }) +
-          UI.field('CSOSN (Simples Nacional)', 'csosn', v.csosn, { type: 'select', options: [
-            { value: '102', label: '102 — Tributada sem permissão de crédito' }, { value: '103', label: '103 — Isenta' },
-            { value: '300', label: '300 — Imune' }, { value: '400', label: '400 — Não tributada' },
-            { value: '500', label: '500 — ST cobrado anteriormente' }] }) +
+          blocoIcms +
           UI.field('CEST (opcional)', 'cest', v.cest || '', { placeholder: '28.0100' }) +
-          UI.field('CST ICMS (regime normal)', 'cst', v.cst || '', { placeholder: 'Preencher conforme contador' }) +
-          UI.field('CST PIS', 'pisCst', v.pisCst || '', { placeholder: 'Preencher conforme contador' }) +
-          UI.field('CST COFINS', 'cofinsCst', v.cofinsCst || '', { placeholder: 'Preencher conforme contador' }) +
+          UI.field('CST PIS', 'pisCst', v.pisCst || '', { placeholder: 'Simples tende a 49; Normal, conforme contador' }) +
+          UI.field('CST COFINS', 'cofinsCst', v.cofinsCst || '', { placeholder: 'Simples tende a 49; Normal, conforme contador' }) +
           UI.field('Origem da mercadoria', 'origin', v.origin || '0', { type: 'select', options: [
             { value: '0', label: '0 - Nacional' }, { value: '1', label: '1 - Estrangeira (importacao direta)' },
             { value: '2', label: '2 - Estrangeira (adquirida no mercado interno)' }, { value: '3', label: '3 - Nacional com conteudo de importacao acima de 40%' },
@@ -872,7 +886,8 @@
             { value: '6', label: '6 - Estrangeira (importacao direta, sem similar nacional)' }, { value: '7', label: '7 - Estrangeira (mercado interno, sem similar nacional)' },
             { value: '8', label: '8 - Nacional com conteudo de importacao acima de 70%' }] }) +
         '</div>' +
-        '<div class="modal-note warn">' + icon('alert', 12) + ' Este sistema <b>não emite NFC-e</b>. Ele prepara os campos fiscais e gera o comprovante de venda auxiliar. Para emitir nota fiscal é necessário um servidor com certificado digital e comunicação com a SEFAZ.</div></div>' +
+        '<div class="modal-note">' + icon('info', 12) + ' ' + notaRegime + '</div>' +
+        '<div class="modal-note warn">' + icon('alert', 12) + ' Este sistema <b>não emite NFC-e</b>. Ele prepara os campos fiscais e gera o comprovante de venda auxiliar. Para emitir nota fiscal é necessário um certificado digital ICP-Brasil (e-CNPJ A1), geração e assinatura do XML da NFC-e e comunicação com a SEFAZ — não basta preencher os dados abaixo.</div></div>' +
 
         '<div class="mpane" data-pane="estoque"><div class="form-grid three">' +
           UI.field('No deposito', 'stockDeposit', v.stockDeposit == null ? (v.stockArea === 'venda' ? 0 : v.stock) : v.stockDeposit, { type: 'number', step: '0.001', min: 0 }) +
@@ -926,7 +941,12 @@
           stockArea: 'deposito',
           depositAisle: String(d.depositAisle || '').trim(), depositShelf: String(d.depositShelf || '').trim(), depositHeight: String(d.depositHeight || '').trim(),
           salesAisle: String(d.salesAisle || '').trim(), salesShelf: String(d.salesShelf || '').trim(), salesHeight: String(d.salesHeight || '').trim(),
-          ncm: d.ncm || '', cfop: d.cfop || '5102', csosn: d.csosn || '102', cest: d.cest || '', origin: d.origin || '0', cst: d.cst || '', pisCst: d.pisCst || '', cofinsCst: d.cofinsCst || '',
+          ncm: d.ncm || '', cfop: d.cfop || '5102', cest: d.cest || '', origin: d.origin || '0',
+          /* So o campo do regime vigente e gravado; o outro fica vazio para
+             nao virar XML invalido quando a emissao existir. */
+          csosn: normal ? '' : (d.csosn || '102'),
+          cst: normal ? (d.cst || '') : '',
+          pisCst: d.pisCst || '', cofinsCst: d.cofinsCst || '',
           expiry: d.expiry || '', lot: d.lot || '', active: !!d.active,
           createdAt: target ? target.createdAt : new Date().toISOString()
         };

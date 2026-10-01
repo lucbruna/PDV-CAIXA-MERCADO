@@ -150,7 +150,7 @@ try {
        O login, porem, confere em scrypt: `sal` + `senhaHash` (servidor/
        servidor.mjs, rota /api/login). Por isso os dois aparecem aqui. */
     auth: { users: [{ id: 'u1', name: 'Admin', username: 'admin', sal, senhaHash, passHash: 'legado', role: 'admin', active: true }] },
-    config: { storeName: 'Teste Navegador' },
+    config: { storeName: 'Teste Navegador', pix: { pixKey: 'loja@email.com', city: 'SAO PAULO' } },
   });
   check('migracao com payload aceita', mig.status === 200, JSON.stringify(mig.dados));
 
@@ -258,6 +258,38 @@ try {
   check('promocao fora da janela cai no preco normal', fora === true);
   const noCart = await cdp.eval("(function(){PDV.clearSale(); PDV.addProduct('pxss', true); var l=(PDV.cart||[]).filter(function(i){return i.id==='pxss';})[0]; return l?l.price:null;})()");
   check('carrinho do PDV aplica o preco promocional', noCart === 5.5, 'preco=' + noCart);
+
+  console.log('\n7d. Pix por valor parcial com confirmacao de recebimento');
+  await cdp.eval("location.hash='pdv'");
+  await espera(700);
+  check('frente de caixa montou', (await cdp.eval("!!document.getElementById('btnPix')")) === true);
+  check('chave Pix configurada chegou do servidor',
+    (await cdp.eval("!!(Store.db.config.pix && Store.db.config.pix.pixKey)")) === true);
+
+  /* Carrinho com um item (preco promocional 5,50) e uma parte de Pix digitada
+     de 5,00: o QR tem de cobrar a PARTE, nao o total da venda. */
+  await cdp.eval("PDV.clearSale(false); PDV.addProduct('pxss', true);");
+  await cdp.eval("(function(){var i=document.getElementById('payInput'); i.value='5'; i.dispatchEvent(new Event('input',{bubbles:true}));})()");
+  await cdp.eval("document.getElementById('btnPix').click()");
+  await espera(450);
+  check('QR do Pix renderiza', (await cdp.eval("!!document.querySelector('#pixQrBox svg')")) === true);
+  const corpoPix = await cdp.eval("(function(){var b=document.querySelector('.overlay .modal-body'); return b ? b.innerText : '';})()");
+  check('QR cobra o valor parcial digitado (R$ 5,00)', corpoPix.includes('5,00'), corpoPix.replace(/\s+/g, ' ').slice(0, 120));
+  check('QR nao cobra o total da venda (R$ 5,50)', !corpoPix.includes('5,50'), corpoPix.replace(/\s+/g, ' ').slice(0, 120));
+
+  await cdp.eval("document.getElementById('btnConfirmPix').click()");
+  await espera(450);
+  const partesTxt = await cdp.eval("document.getElementById('payParts').innerText");
+  check('parte de Pix lancada com o valor parcial', partesTxt.includes('5,00'), partesTxt.replace(/\s+/g, ' '));
+  check('parte de Pix marcada como recebida', /recebido/i.test(partesTxt), partesTxt.replace(/\s+/g, ' '));
+  check('dialogo do Pix fechou', (await cdp.eval("!document.querySelector('.overlay')")) === true);
+
+  /* Segundo QR do mesmo Pix tem de ser bloqueado, senao a venda cobraria duas
+     vezes a mesma forma. */
+  await cdp.eval("document.getElementById('btnPix').click()");
+  await espera(300);
+  check('segundo QR do mesmo Pix e bloqueado',
+    (await cdp.eval("!document.querySelector('.overlay')")) === true);
 
   console.log('\n8. Nenhuma excecao nao tratada na pagina');
   const excecoes = cdp.eventos.filter((e) => e.method === 'Runtime.exceptionThrown');

@@ -7,11 +7,11 @@ Estado em 2026-09-30. O que está pronto foi verificado por
 `servidor/teste/frontend-seguro.mjs` (15),
 `servidor/teste/sync-cadastro.mjs` (16),
 `servidor/teste/centavos-migracao.mjs` (10),
-`servidor/teste/navegador-seguro.mjs` (38),
+`servidor/teste/navegador-seguro.mjs` (47),
 `servidor/teste/estoque-reconcilia.mjs` (16),
 `servidor/teste/pix-fiscal.mjs` (46) e por instalação real do
 `instalar-linux.sh` com service + nginx numa máquina de fábrica.
-São **311 asserções** no total, todas passando.
+São **320 asserções** no total, todas passando.
 
 ## Pronto
 
@@ -217,7 +217,29 @@ Estes pontos não bloqueiam a instalação. A maior parte já foi fechada (ver
 
 ## Fora do escopo (decisão do cliente, não falta técnica)
 
-- **NFC-e / MFE.** Hoje emite comprovante não fiscal. Ver CHECKLIST-PDV.md
-  §2.1 — exige decisão A/B (sem fiscal, ou integrado a provedor).
-- **Sintefonia com a SEFAZ.** Depende do CNPJ e do credenciamento do
+- **NFC-e / MFE.** Hoje emite comprovante não fiscal — e **"preencher os dados
+  da SEFAZ" não basta**. O que existe é só o cadastro dos campos fiscais (NCM,
+  CFOP, CSOSN/CST, CEST, origem, CST PIS/COFINS) e da config da empresa (CNPJ,
+  IE, CRT, CNAE, código IBGE), e o produto escolhe CSOSN ou CST conforme o
+  regime (CRT). Para emitir de verdade faltaria:
+  - **Certificado ICP-Brasil e-CNPJ A1** — o `certificado.pfx` do projeto é TLS
+    autoassinado para HTTPS e não assina documento fiscal;
+  - **cálculo de tributos** (base, alíquota, ICMS-ST, PIS/COFINS) e os
+    totalizadores da NFC-e;
+  - **CFOP derivado da operação** (dentro/fora do estado, ST, devolução) — hoje
+    é um padrão 5102 no cadastro;
+  - **XML da NFC-e (layout 4.00) + chave de acesso de 44 dígitos** (com DV) e
+    **série/número próprios** do documento fiscal (o `seq` atual é o da venda);
+  - **assinatura XML-DSig** do XML;
+  - **comunicação com a SEFAZ** por UF (SOAP `NFeAutorizacao4`/`NFeRetAutorizacao4`,
+    mTLS com o A1, recibo, consulta do protocolo, contingência EPEC/offline);
+  - **QR Code oficial da NFC-e** (`p=<chave>|<versão>|<ambiente>|<idCSC>` com
+    `cHashQRCode` SHA-1 sobre o CSC) — **spec diferente** do BR Code Pix, embora
+    o renderizador de QR (`js/qr.js`) seja reaproveitável;
+  - **CSC/idToken por UF**, **numeração/inutilização**, **cancelamento** e o
+    **DANFE** com os campos obrigatórios.
+
+  Ver CHECKLIST-PDV.md §2.1 — exige decisão A/B (sem fiscal, ou integrado a
+  provedor, que é o caminho mais curto para o lojista).
+- **Sintonia com a SEFAZ.** Depende do CNPJ e do credenciamento do
   estabelecimento.

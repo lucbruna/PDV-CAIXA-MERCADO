@@ -750,6 +750,7 @@
 
     return frag(
       pageHead('Produtos e estoque', 'Cadastro completo, custo, margem, validade e mínimos.', [
+        btn('Fiscal NFC-e', 'file', 'btn', function () { fiscalReadiness(); }),
         btn('Etiquetas', 'tag', 'btn', function () { printLabels(); }),
         btn('Importar CSV', 'up', 'btn', function () { importProducts(); }),
         btn('Novo produto', 'plus', 'btn primary', function () { editProduct(); })
@@ -809,6 +810,67 @@
         ]);
       })
     );
+  }
+
+  /* ---------- PRONTIDÃO FISCAL ----------
+   * Lista, por produto ativo, o que falta para os campos mínimos de uma
+   * futura NFC-e. Não emite nada: é um checklist do cadastro. Qual campo de
+   * ICMS conta depende do regime (CRT) — CSOSN no Simples, CST no Normal. */
+  function fiscalReadiness() {
+    var db = Store.db;
+    var regime = String(db.config.crt || '');
+    var normal = regime === '3';
+    var ativos = db.products.filter(function (p) { return p.active; });
+
+    function faltas(p) {
+      var f = [];
+      if (!String(p.ncm || '').trim()) f.push('NCM');
+      if (!String(p.cfop || '').trim()) f.push('CFOP');
+      if (normal) { if (!String(p.cst || '').trim()) f.push('CST ICMS'); }
+      else if (!String(p.csosn || '').trim()) f.push('CSOSN');
+      if (!String(p.pisCst || '').trim()) f.push('CST PIS');
+      if (!String(p.cofinsCst || '').trim()) f.push('CST COFINS');
+      return f;
+    }
+
+    var pendentes = ativos.map(function (p) { return { p: p, f: faltas(p) }; })
+      .filter(function (x) { return x.f.length; });
+    var prontos = ativos.length - pendentes.length;
+
+    var linhas = pendentes.map(function (x) {
+      return el('div', { class: 'list-item' }, [
+        el('span', { class: 'thumb-emoji' }, x.p.emoji || '📦'),
+        el('span', { class: 'grow' }, [
+          el('b', null, x.p.name),
+          el('br'),
+          el('span', { class: 'tiny muted' }, 'Falta: ' + x.f.join(', '))
+        ]),
+        el('button', { class: 'mini-btn', 'data-fix': x.p.id, title: 'Corrigir cadastro' }, iconEl('edit', 12))
+      ]);
+    });
+
+    UI.modal({
+      title: 'Prontidão fiscal (NFC-e)', icon: 'file', size: 'lg', footer: false,
+      body: frag(
+        el('div', { class: 'grid kpis', style: { 'margin-bottom': '12px' } }, [
+          kpiEl('Produtos prontos', String(prontos), 'de ' + ativos.length + ' ativos', 'teal'),
+          kpiEl('Pendentes', String(pendentes.length), 'faltando campo fiscal', pendentes.length ? 'amber' : 'teal'),
+          kpiEl('ICMS do regime', normal ? 'CST' : 'CSOSN', regime ? 'CRT ' + regime : 'CRT não definido', 'accent')
+        ]),
+        el('div', { class: 'modal-note' }, 'Este painel confere só o cadastro. Emitir NFC-e exige também certificado ICP-Brasil (e-CNPJ A1), geração e assinatura do XML e comunicação com a SEFAZ.'),
+        pendentes.length
+          ? el('div', { class: 'list-plain' }, linhas)
+          : emptyEl('Nada pendente', 'Todos os produtos ativos têm os campos fiscais mínimos.', 'file')
+      ),
+      onMount: function (root, close) {
+        root.addEventListener('click', function (e) {
+          var b = e.target.closest('[data-fix]');
+          if (!b) return;
+          close();
+          editProduct(b.dataset.fix);
+        });
+      }
+    });
   }
 
   function editProduct(id) {

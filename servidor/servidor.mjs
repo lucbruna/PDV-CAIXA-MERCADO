@@ -24,6 +24,13 @@ import { centavos, reais } from './dinheiro.mjs';
 
 const aqui = dirname(fileURLToPath(import.meta.url));
 const RAIZ_APP = join(aqui, '..');
+/* Versao do app: fonte unica no arquivo VERSION (raiz do projeto). Se o
+   arquivo nao vier junto (copia incompleta), nao derruba o servidor -- so
+   reporta 0.0.0 em /api/status. */
+const VERSAO = (() => {
+  try { return readFileSync(join(RAIZ_APP, 'VERSION'), 'utf8').trim() || '0.0.0'; }
+  catch { return '0.0.0'; }
+})();
 const PORTA = Number(process.env.SUDAM_PORTA || 8787);
 
 const db = banco.abrir();
@@ -316,7 +323,7 @@ rota('GET', '/api/status', async (req, res) => {
   json(res, {
     ok: true,
     nome: 'Sudam Gestao PDV',
-    versao: banco.lerMeta(db, 'versao') || '1.0.0',
+    versao: VERSAO,
     migrado: banco.lerMeta(db, 'migrado') === 'sim',
     configurado: db.prepare('SELECT COUNT(*) AS n FROM usuarios').get().n > 0,
     produtos: db.prepare('SELECT COUNT(*) AS n FROM produtos').get().n,
@@ -975,7 +982,7 @@ function ipsLocais() {
 }
 
 servidor.listen(PORTA, HOST, () => {
-  banco.gravarMeta(db, 'versao', '1.0.0');
+  banco.gravarMeta(db, 'versao', VERSAO);
   /* Nada do que vem a seguir pode derrubar o processo: e informacao de
    * diagnostico, escrita depois do "no ar". */
   try {

@@ -347,7 +347,7 @@ passa a ser XSS completo se o CSP for afrouxado ou se o app for aberto por
 node servidor/teste/navegador-seguro.mjs "%TEMP%" "%CD%\servidor"
 ```
 
-47 asserções que abrem o app no Chrome headless (via DevTools Protocol, sem
+49 asserções que abrem o app no Chrome headless (via DevTools Protocol, sem
 dependência nova), fazem **login pela própria tela**, gravam um produto (com
 preço promocional) e um cliente com payload de XSS e conferem: nenhum elemento
 injetado aparece em Início, PDV, Vendas, Produtos, Compras, Clientes,
@@ -360,8 +360,8 @@ para provar que o detector enxerga o ataque quando ele existe.
 
 Também exercita o **Pix por valor parcial**: com um item no carrinho e a parte
 Pix digitada, o QR passa a cobrar a **parte** (não o total); o rótulo
-"Confirmar recebimento" lança a parte já marcada como recebida; e um segundo QR
-do mesmo Pix é bloqueado para a venda não cobrar duas vezes a mesma forma.
+"Confirmar recebimento" lança a parte já marcada como recebida; e um **segundo
+Pix** (duas pessoas dividindo a conta) abre outro QR cobrando o restante.
 
 Requer o Google Chrome instalado (caminho padrão; use `CHROME` para apontar
 outro).
@@ -425,9 +425,34 @@ não batem (uma venda entrando no meio da cópia). É só copiar o arquivo de vo
 
 ---
 
+## Versionamento
+
+A versão do programa vive num arquivo só: **`VERSION`** (uma linha, ex.:
+`2.0.0`). O servidor lê dele e reporta em `/api/status`; o instalador lê dele
+via o helper abaixo. Nada de número duplicado em dois lugares.
+
+```bash
+node versao.mjs            # mostra a versão atual
+node versao.mjs bump patch # 2.0.0 -> 2.0.1 (também: minor, major)
+node versao.mjs sync       # reescreve #define AppVersion no instalador.iss
+```
+
+Convenção: **cada commit sobe a versão** (`bump patch`/`minor`/`major`) e a
+tag `vX.Y.Z` marca o commit no GitHub. O workflow
+`.github/workflows/versao.yml` cria a tag automaticamente a cada push na
+`main`, lendo o `VERSION` — commits sem bump não geram tag nova, e uma tag
+existente nunca é movida.
+
+O `COMPILAR-INSTALADOR.bat` roda `node versao.mjs sync` antes de compilar, para
+o instalador nunca sair com a versão antiga.
+
+---
+
 ## Estrutura do projeto
 
 ```
+├── VERSION             # fonte única da versão
+├── versao.mjs          # mostra / sobe / sincroniza a versão
 ├── index.html          # app principal (uma página; o resto são stubs de redirecionamento)
 ├── js/                 # api, store, qr, ui, pdv, app
 ├── css/                # app.css, vertice.css

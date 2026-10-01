@@ -7,11 +7,11 @@ Estado em 2026-09-30. O que está pronto foi verificado por
 `servidor/teste/frontend-seguro.mjs` (15),
 `servidor/teste/sync-cadastro.mjs` (16),
 `servidor/teste/centavos-migracao.mjs` (10),
-`servidor/teste/navegador-seguro.mjs` (47),
+`servidor/teste/navegador-seguro.mjs` (49),
 `servidor/teste/estoque-reconcilia.mjs` (16),
 `servidor/teste/pix-fiscal.mjs` (46) e por instalação real do
 `instalar-linux.sh` com service + nginx numa máquina de fábrica.
-São **320 asserções** no total, todas passando.
+São **322 asserções** no total, todas passando.
 
 ## Pronto
 

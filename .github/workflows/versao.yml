@@ -1,0 +1,42 @@
+# Numera a versao no GitHub a cada push na main.
+#
+# A versao vive no arquivo VERSION (fonte unica). Este workflow le esse
+# arquivo e cria a tag `vX.Y.Z` apontando para o commit, se ela ainda nao
+# existir. Commits sem bump de versao nao geram tag nova -- a tag de um
+# numero ja criado nunca e movida.
+#
+# Cada commit deve subir a versao: `node versao.mjs bump patch` (ou minor /
+# major) antes de commitar. Ver a secao "Versionamento" do README.
+name: Tag de versao
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ler a versao
+        id: v
+        run: echo "valor=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Criar a tag se ainda nao existir
+        env:
+          V: ${{ steps.v.outputs.valor }}
+        run: |
+          if ! echo "$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "VERSION invalido: '$V'"; exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/v$V" | grep -q "refs/tags/v$V$"; then
+            echo "Tag v$V ja existe; nada a fazer."
+            exit 0
+          fi
+          git tag "v$V"
+          git push origin "v$V"
+          echo "Tag v$V criada."

@@ -11,6 +11,9 @@ if not defined ISCC (
   pause
   exit /b 1
 )
+rem A versao vive no arquivo VERSION. Sincroniza o .iss antes de compilar,
+rem senao o instalador sai com a versao antiga.
+where node >nul 2>nul && node "%~dp0versao.mjs" sync
 "%ISCC%" "%~dp0instalador.iss"
 if errorlevel 1 exit /b %errorlevel%
 rem Le a versao do proprio .iss para o aviso nao mentir quando ela subir.

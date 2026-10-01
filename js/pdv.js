@@ -418,7 +418,9 @@
   function addPayPart() {
     var amount = UI.round2(UI.parseNum(payInput));
     if (amount <= 0) { UI.toast('Informe o valor desta forma de pagamento.', 'warn'); return; }
-    if (payParts.some(function (p) { return p.method === payMethod; })) {
+    /* Pix pode se repetir: duas pessoas pagando a mesma conta, cada uma com
+       seu QR. As demais formas continuam unicas para nao duplicar troco. */
+    if (payMethod !== 'Pix' && payParts.some(function (p) { return p.method === payMethod; })) {
       UI.toast('Esta forma já está na venda. Remova antes de adicionar de novo.', 'warn');
       return;
     }
@@ -927,9 +929,16 @@
     }).join('');
 
     var pays = s.payments.map(function (p) {
-      var received = UI.round2(p.amount - (p.method === 'Dinheiro' ? s.change : 0));
-      return '<div class="r"><span>' + esc(p.method) + '</span><span>' + UI.num(p.amount) + '</span></div>' +
+      var linha = '<div class="r"><span>' + esc(p.method) + '</span><span>' + UI.num(p.amount) + '</span></div>' +
         (p.method === 'Dinheiro' && s.change > 0 ? '<div class="r"><span>Troco</span><span>' + UI.num(s.change) + '</span></div>' : '');
+      /* Pix: o comprovante registra que o recebimento foi confirmado e por
+         quem. E a prova de que o operador conferiu o credito antes de
+         entregar a mercadoria. */
+      if (p.method === 'Pix' && p.confirmedBy) {
+        linha += '<div class="c" style="font-size:9px">Pix recebido · confirmado por ' + esc(p.confirmedBy) +
+          (p.confirmedAt ? ' em ' + UI.dt(p.confirmedAt) : '') + '</div>';
+      }
+      return linha;
     }).join('');
 
     var html =
@@ -1233,10 +1242,6 @@
     if (i) i.focus();
   }
 
-  function pixParte() {
-    return payParts.filter(function (p) { return p.method === 'Pix'; })[0] || null;
-  }
-
   /* Valor do Pix: o que o operador digitou; se nada foi digitado, o quanto
      ainda falta receber. E isto que faz o QR cobrar SO a parte do Pix num
      pagamento dividido, em vez de sempre o total da venda. */
@@ -1247,11 +1252,10 @@
     return falta > 0 ? falta : total();
   }
 
+  /* Mais de um Pix na mesma venda e permitido de proposito: duas pessoas
+     dividindo a conta pagam cada uma com seu QR. Cada parte leva o proprio
+     carimbo de recebimento (ver a parte que este dialogo lanca). */
   function showPixDialog() {
-    if (pixParte()) {
-      UI.toast('Esta venda já tem um Pix. Remova a parte antes de gerar outro QR.', 'warn');
-      return;
-    }
     var amount = UI.round2(pixValorSugerido());
     if (!(amount > 0)) { UI.toast('Adicione itens à venda.', 'warn'); return; }
     /* O txid usa o numero que a venda VAI receber, sem consumi-lo: abrir e

@@ -284,12 +284,18 @@ try {
   check('parte de Pix marcada como recebida', /recebido/i.test(partesTxt), partesTxt.replace(/\s+/g, ' '));
   check('dialogo do Pix fechou', (await cdp.eval("!document.querySelector('.overlay')")) === true);
 
-  /* Segundo QR do mesmo Pix tem de ser bloqueado, senao a venda cobraria duas
-     vezes a mesma forma. */
+  /* Dois Pix na mesma venda (duas pessoas pagando): o segundo QR abre e cobra
+     o que ainda falta, nao o total de novo. */
   await cdp.eval("document.getElementById('btnPix').click()");
-  await espera(300);
-  check('segundo QR do mesmo Pix e bloqueado',
-    (await cdp.eval("!document.querySelector('.overlay')")) === true);
+  await espera(400);
+  check('segundo Pix abre outro QR',
+    (await cdp.eval("!!document.querySelector('#pixQrBox svg')")) === true);
+  const corpoPix2 = await cdp.eval("(function(){var b=document.querySelector('.overlay .modal-body'); return b ? b.innerText : '';})()");
+  check('segundo QR cobra o restante (R$ 0,50)', corpoPix2.includes('0,50'), corpoPix2.replace(/\s+/g, ' ').slice(0, 120));
+  await cdp.eval("document.getElementById('btnConfirmPix').click()");
+  await espera(400);
+  const doisPix = await cdp.eval("(document.getElementById('payParts').innerText.match(/Pix/g)||[]).length");
+  check('duas partes de Pix lancadas', doisPix === 2, 'pix=' + doisPix);
 
   console.log('\n8. Nenhuma excecao nao tratada na pagina');
   const excecoes = cdp.eventos.filter((e) => e.method === 'Runtime.exceptionThrown');
